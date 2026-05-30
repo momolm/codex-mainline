@@ -1,0 +1,312 @@
+{
+  "botCommands": {
+    "status": "Show Codex Mainline status",
+    "effort": "Show or change default reasoning effort",
+    "rhythm": "Show or change autonomous wake rhythm",
+    "session": "Show or switch Codex session",
+    "history": "Search Codex session history",
+    "goal": "Show or control native goal",
+    "computer": "Use Computer Use for one desktop task",
+    "stop": "Interrupt current reply and pause active goal",
+    "plan": "Generate one plan-mode response",
+    "language": "Show or change interface language"
+  },
+  "common": {
+    "unknown": "(unknown)",
+    "none": "(none)",
+    "empty": "(empty)",
+    "unset": "(unset)",
+    "yes": "yes",
+    "no": "no",
+    "enabled": "enabled",
+    "disabled": "disabled",
+    "beijingTime": "{time} Asia/Shanghai",
+    "writtenBack": "Written back: {path}"
+  },
+  "log": {
+    "userToCodex": "user -> Codex",
+    "userToBridge": "user -> bridge",
+    "codexToUser": "Codex -> user",
+    "codexPlan": "Codex plan",
+    "rhythmToCodex": "rhythm -> Codex"
+  },
+  "startup": {
+    "sourceLabel": "User message",
+    "contextMissing": "(no startup context paths configured)",
+    "header": "[Startup Guide]",
+    "intro": "This is a new Telegram mainline session. First complete startup: read the configured context files and recover the current project notes and operating boundaries.",
+    "replyRule": "After reading them, do not output a long startup report. Reply naturally to the user and keep the same context for later conversation.",
+    "deliveryRule": "The current entry point is Telegram. When you truly need to deliver a local file back to Telegram, append <tg_send_file path=\"local file path\" /> at the end of your reply. Do not use that marker for ordinary chat or analysis.",
+    "wakeRule": "After startup, briefly tell the user you are ready. Do not create a complex process, start the rhythm loop, or enter an extra state machine.",
+    "wakeAction": "Autonomous action."
+  },
+  "telegramInput": {
+    "quotedHeader": "[Quoted Telegram Message]",
+    "currentHeader": "[Current User Message]",
+    "content": "content: {text}",
+    "quote": "quote: {text}",
+    "attachment": "attachment: {text}",
+    "noReadableQuoted": "content: (no readable text or attachment summary)",
+    "currentImages": "content: (the current message contains {count} image(s); see following image inputs.)",
+    "currentNoText": "content: (the current message has no readable text.)",
+    "imageOnly": "(the current message contains an image; see following image input.)"
+  },
+  "runDetails": {
+    "title": "Codex run details{suffix} ({state})",
+    "blockSuffix": " block {index}",
+    "live": "live",
+    "done": "done",
+    "stage": "stage: {reason}",
+    "status": "status: {state}",
+    "latest": "latest: {latest}",
+    "expandHint": "Expand to view tool calls and output summaries.",
+    "truncated": "...TG run details were truncated; full events and raw tool output are stored in {path}",
+    "toolOutput": "tool output",
+    "toolCall": "tool call",
+    "toolDone": "tool completed",
+    "webSearch": "web search",
+    "contextCompaction": "context compaction",
+    "systemEvent": "system event",
+    "systemError": "system error"
+  },
+  "rhythm": {
+    "fallbackMessage": "[Codex Mainline]: Knock knock. Start autonomous action according to the current context.",
+    "telegramNotice": "Codex Mainline woke autonomously.",
+    "title": "Codex rhythm:",
+    "status": "current state: {status}",
+    "statusOn": "enabled, {minutes}m",
+    "nextWake": "next wake: {time}",
+    "usage": [
+      "Usage: /rhythm 10m",
+      "Usage: /rhythm 20m",
+      "Usage: /rhythm 60m",
+      "Usage: /rhythm on",
+      "Usage: /rhythm off"
+    ],
+    "note": "Note: only minute values with the m suffix are accepted. Changes are written to settings immediately and the next wake time is recalculated without restart.",
+    "unsupported": "Unsupported rhythm parameter: {value}",
+    "changed": "Rhythm changed: {from} -> {to}"
+  },
+  "workBudget": {
+    "fallbackPrompt": [
+      "[Rhythm - Rest]",
+      "You have been working for a while. Naturally close out this turn, record necessary results or follow-up plans, then stop and rest for a while."
+    ]
+  },
+  "compaction": {
+    "started": "Codex Mainline is compacting context. Please wait.",
+    "busy": "Codex Mainline is compacting context, so this command is not being run now. Please send it again later.",
+    "queued": "Codex Mainline is compacting context. This message has been queued and will be processed in order after compaction completes.",
+    "completed": "Codex Mainline context compaction completed.",
+    "defaultStep": "recovery setting",
+    "failedNext": "Codex Mainline context compaction failed. Switching to {step} and continuing compaction.",
+    "failed": "Codex Mainline context compaction failed and is waiting for the next recovery step.",
+    "timedOutNext": "Codex Mainline context compaction did not emit a completion event. Switching to {step} and continuing compaction.",
+    "timedOut": "Codex Mainline context compaction did not emit a completion event and is waiting for the next recovery step.",
+    "exhausted": "Codex Mainline context compaction failed {maxAttempts} times in a row and automatic retry has stopped. Use /session new for a fresh session, or handle the old session manually later.",
+    "resumePrompt": "[Codex Mainline]: Knock knock. The failed context-compaction chain has recovered and compaction succeeded; continue the task.",
+    "resumeSourceLabel": "Codex Mainline compaction recovery",
+    "recoveryPending": "pending, attempt {attempt}: {step}",
+    "recoveryOverLimit": "pending, but automatic retry limit has been exceeded",
+    "recoveryActive": "{step} compaction/default restore in progress",
+    "resumePending": "compaction recovered; resume prompt pending",
+    "circuitOpen": "circuit open: {reason}",
+    "none": "none"
+  },
+  "time": {
+    "hours5": "5h",
+    "days7": "7d",
+    "days": "{value}d",
+    "hours": "{value}h",
+    "minutes": "{value}m",
+    "unknownWindow": "unknown window"
+  },
+  "status": {
+    "title": "Codex Mainline TG Status",
+    "session": "session: {thread}",
+    "threadMissing": "(not created)",
+    "contextNone": "context: no snapshot yet (updates after the next model event)",
+    "context": "context: {bar} {remaining}% remaining (used {used}/total {total})",
+    "snapshot": "snapshot: {time}",
+    "limitNone": "{label}: no snapshot",
+    "limit": "{label}: {bar} {remaining}% remaining (reset: {reset})",
+    "primaryLimitNone": "5h limit: no snapshot",
+    "secondaryLimitNone": "7d limit: no snapshot",
+    "limitLabel": "{window} limit",
+    "activeTurn": "active turn: {value}",
+    "effort": "effort: {value}",
+    "resting": "resting: {value}",
+    "until": "yes, until {time}",
+    "notResting": "no",
+    "compacting": "compacting: {value}",
+    "proactiveCompact": "proactive compact at: used >= {percent}%",
+    "compactionRecovery": "compaction recovery: {value}",
+    "nextWake": "next wake: {time}",
+    "lastWake": "last wake: {time}",
+    "wakeCount": "wake count: {count}",
+    "lastWakeSkip": "last wake skip: {value}",
+    "lastVisibleOutput": "last codex visible output: {time}",
+    "lastError": "last error: {value}",
+    "rhythm": "rhythm: {value}"
+  },
+  "effort": {
+    "current": "Current default effort: {effort}",
+    "usage": [
+      "Usage: /effort low",
+      "Usage: /effort medium",
+      "Usage: /effort high",
+      "Usage: /effort xhigh"
+    ],
+    "note": "Note: this immediately changes the default reasoning effort for future turns and writes settings to disk. A currently running turn is not changed mid-flight.",
+    "unsupported": "Unsupported effort: {value}",
+    "changed": "Default effort changed: {from} -> {to}",
+    "activeTurnNote": "A currently running turn will not change mid-flight; this takes effect on the next turn.",
+    "nextTurnNote": "This takes effect on the next turn; no restart is required."
+  },
+  "language": {
+    "current": "Current language: {locale}",
+    "usage": [
+      "Usage: /language zh-CN",
+      "Usage: /language en-US"
+    ],
+    "note": "Note: this immediately changes future bridge-layer mechanical output and writes settings to disk. A currently running turn is not changed mid-flight.",
+    "unsupported": "Unsupported language: {value}",
+    "changed": "Language changed: {from} -> {to}",
+    "nextTurnNote": "Future bridge-layer mechanical output will use the new language."
+  },
+  "session": {
+    "statusTitle": "Codex session:",
+    "thread": "thread: {thread}",
+    "newThreadNext": "(not created; the next turn will create one)",
+    "usage": [
+      "Usage: /session new",
+      "Usage: /session use <thread_id>"
+    ],
+    "note": "Note: this only disconnects the current binding so the next turn creates a new Codex thread. Old sessions remain in native Codex App / CLI history.",
+    "invalidThread": "Invalid thread_id format. Usage: /session use <thread_id>",
+    "compacting": "Codex Mainline is compacting context, so session switching is postponed.",
+    "activeTurn": "Codex Mainline still has an active turn. Wait for it to finish, then send {command}.",
+    "resumeFailed": "Could not resume that thread_id; binding was not changed: {error}",
+    "switched": [
+      "TG mainline thread binding switched.",
+      "current thread: {current}",
+      "previous thread: {previous}",
+      "The next normal message will enter the bound session."
+    ],
+    "cleared": [
+      "Current TG mainline thread binding cleared.",
+      "old thread: {previous}",
+      "The next normal message or autonomous wake will create a new Codex thread and reread startup docs.",
+      "The old session remains visible in native Codex App / CLI history; to return, send:",
+      "{returnCommand}"
+    ]
+  },
+  "history": {
+    "usage": [
+      "Usage: /history <keyword>",
+      "Note: searches native Codex chats / threads and returns titles, times, thread_id values, and snippets.",
+      "Switch back by copying /session use <thread_id> from the result."
+    ],
+    "untitled": "(untitled session)",
+    "title": "History search: {query}",
+    "noResults": "No matching Codex sessions found.",
+    "count": "Results: {count}",
+    "thread": "   thread: {thread}",
+    "summary": "   summary: {snippet}",
+    "switch": "   switch: /session use {thread}",
+    "more": "More results are available; the TG command currently returns only the first page.",
+    "unsupported": "The running app-server does not support thread/search yet. Restart TG mainline so it starts a newer Codex app-server, then try /history <keyword> again.",
+    "failed": "History search failed: {error}"
+  },
+  "goal": {
+    "title": "Native Codex goal:",
+    "notSet": "No goal is currently set.",
+    "usage": [
+      "Usage: /goal",
+      "Usage: /goal <objective>",
+      "Usage: /goal pause",
+      "Usage: /goal resume",
+      "Usage: /goal edit <new objective>",
+      "Usage: /goal clear",
+      "Usage: /stop"
+    ],
+    "note1": "Note: these commands only operate on the native Codex goal; they do not write long-term project goals.",
+    "note2": "Note: /stop requests interruption of the current turn and pauses the active goal.",
+    "tokenBudgetUnset": "(unset)",
+    "status": "status: {status}",
+    "objective": "objective: {objective}",
+    "objectiveEmpty": "(empty)",
+    "elapsed": "elapsed: {seconds}s",
+    "updated": "updated: {time}",
+    "readFailed": "Failed to read goal: {error}",
+    "cleared": "Native Codex goal cleared.",
+    "nothingToClear": "There is no Codex thread or goal to clear.",
+    "set": "Native Codex goal set.",
+    "paused": "Native Codex goal paused.",
+    "nothingToPause": "There is no native Codex goal to pause.",
+    "resumed": "Native Codex goal resumed.",
+    "nothingToResume": "There is no native Codex goal to resume.",
+    "updatedOk": "Native Codex goal updated.",
+    "nothingToEdit": "There is no native Codex goal to edit. Use /goal <objective> to create one.",
+    "failed": "Goal command failed: {error}",
+    "needThread": "There is no Codex thread yet. Send a normal message to start the session before setting /goal."
+  },
+  "stop": {
+    "handled": "Stop request handled.",
+    "interruptFailed": "Failed to interrupt current turn: {error}",
+    "interrupted": "Requested interruption of current turn: {turnId}",
+    "noActiveTurn": "There is no active turn.",
+    "pauseFailed": "Failed to pause active goal: {error}",
+    "pausedGoal": "Also paused the active goal to avoid starting the next pursuit automatically.",
+    "goalStatus": "Current goal status: {status}",
+    "noGoal": "There is no native goal."
+  },
+  "plan": {
+    "usage": [
+      "Usage: /plan <what you want planned>",
+      "Example: /plan improve a beef-and-tomato stew recipe."
+    ],
+    "finished": "Plan generated. You can reply with revisions directly; to execute, say so clearly in a normal message.",
+    "activeTurn": "Codex Mainline still has an active turn. Wait for it to finish, then send /plan <content>."
+  },
+  "computer": {
+    "usage": [
+      "Usage: /computer <desktop task to perform on Windows>",
+      "Example: /computer minimize the Telegram window",
+      "",
+      "Note: this command requests the Computer Use plugin at the start of the turn and follows the official local instructions to connect to the Windows control interface."
+    ],
+    "activeTurn": "Codex Mainline still has an active turn. Wait for it to finish, then send /computer <task>.",
+    "requestHeader": "[Computer Use Request]",
+    "requestLine1": "Use the official Computer Use plugin to handle the Windows desktop task below.",
+    "requestLine2": "First read the local computer-use plugin instructions, connect with the official minimal bootstrap, and verify lightly with sky.list_apps(); do not decide it is unavailable before completing bootstrap."
+  },
+  "main": {
+    "dryRunTitle": "Codex Mainline - Dry Run",
+    "dryRunLines": [
+      "locale={locale}",
+      "has_bot_token={hasBotToken}",
+      "allowed_chat_id={allowedChatId}",
+      "telegram_proxy_url={telegramProxyUrl}",
+      "app_server_endpoint={appServerEndpoint}",
+      "model={model}",
+      "service_tier={serviceTier}",
+      "effort={effort}",
+      "bot_commands={botCommands}",
+      "rhythm={rhythm}",
+      "work_budget={workBudget}",
+      "rest={rest}",
+      "state_path={statePath}",
+      "thread_id={threadId}",
+      "next_wake_at={nextWakeAt}"
+    ],
+    "newThreadFirstTurn": "(new thread on first turn)",
+    "willArmOnStart": "(will arm on start)",
+    "startTitle": "Codex Mainline",
+    "started": "Codex Mainline started.",
+    "watchdogLabel": "Watchdog message",
+    "watchdogLog": "Watchdog -> Codex",
+    "unsupportedMessage": "I currently only handle text messages.",
+    "activeAppendFallback": "Appending to the previous active turn failed. Please handle the following user message naturally as a new turn."
+  }
+}

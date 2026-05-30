@@ -11,7 +11,7 @@ Do not commit:
 - Event logs.
 - Payload sidecars.
 - Private prompts.
-- Memory or handoff files from another project.
+- Private project notes or local operator files.
 
 Recommended practices:
 
@@ -34,7 +34,7 @@ Recommended practices:
 - 事件日志。
 - payload sidecar。
 - 私有 prompt。
-- 其他项目的记忆或交接文件。
+- 项目私有说明或本地操作文件。
 
 建议：
 

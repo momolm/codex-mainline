@@ -1,0 +1,312 @@
+{
+  "botCommands": {
+    "status": "查看 Codex Mainline 状态",
+    "effort": "查看或切换默认思考强度",
+    "rhythm": "查看或切换自主激活周期",
+    "session": "查看或切换 Codex session",
+    "history": "搜索 Codex 历史 session",
+    "goal": "查看或控制原生 goal",
+    "computer": "启用 Computer Use 处理一次桌面任务",
+    "stop": "中止当前回复并暂停 active goal",
+    "plan": "用 Plan 模式生成一次计划",
+    "language": "查看或切换界面语言"
+  },
+  "common": {
+    "unknown": "(未知)",
+    "none": "(无)",
+    "empty": "(空)",
+    "unset": "(未设置)",
+    "yes": "有",
+    "no": "无",
+    "enabled": "开启",
+    "disabled": "关闭",
+    "beijingTime": "{time} 北京时间",
+    "writtenBack": "已写回：{path}"
+  },
+  "log": {
+    "userToCodex": "用户 -> Codex",
+    "userToBridge": "用户 -> bridge",
+    "codexToUser": "Codex -> 用户",
+    "codexPlan": "Codex plan",
+    "rhythmToCodex": "节律 -> Codex"
+  },
+  "startup": {
+    "sourceLabel": "用户消息",
+    "contextMissing": "(未配置启动上下文路径)",
+    "header": "【启动引导】",
+    "intro": "这是新的 Telegram mainline 会话。请先完成启动流程：读取以下配置的上下文文件，恢复当前项目说明和操作边界。",
+    "replyRule": "读完后，不要输出冗长启动报告，直接自然回复用户。后续保持同一个上下文自然对话。",
+    "deliveryRule": "当前入口是 Telegram；当你确实需要把本地文件交付回 Telegram 时，在回复末尾输出 <tg_send_file path=\"本地文件路径\" />。普通聊天和分析不要使用该标记。",
+    "wakeRule": "启动完成后简短告诉用户你已准备好。不要制定复杂流程，不要启动节律器，不要进入额外状态机。",
+    "wakeAction": "自主行动。"
+  },
+  "telegramInput": {
+    "quotedHeader": "【Telegram 被引用消息】",
+    "currentHeader": "【用户当前消息】",
+    "content": "内容: {text}",
+    "quote": "引用片段: {text}",
+    "attachment": "附件: {text}",
+    "noReadableQuoted": "内容: （无可读取文本或附件摘要）",
+    "currentImages": "内容: （当前消息包含 {count} 张图片，见后续图片输入。）",
+    "currentNoText": "内容: （当前消息没有可读取文本。）",
+    "imageOnly": "（当前消息包含图片，见后续图片输入。）"
+  },
+  "runDetails": {
+    "title": "Codex 运行细节{suffix}（{state}）",
+    "blockSuffix": " 第 {index} 块",
+    "live": "实时",
+    "done": "完成",
+    "stage": "阶段: {reason}",
+    "status": "状态: {state}",
+    "latest": "最新: {latest}",
+    "expandHint": "展开查看完整工具调用与输出摘要。",
+    "truncated": "...TG 运行细节已截断；完整事件与原始工具输出保存在 {path}",
+    "toolOutput": "工具输出",
+    "toolCall": "工具调用",
+    "toolDone": "工具完成",
+    "webSearch": "网页搜索",
+    "contextCompaction": "上下文压缩",
+    "systemEvent": "系统事件",
+    "systemError": "系统错误"
+  },
+  "rhythm": {
+    "fallbackMessage": "【Codex Mainline】: Knock knock，请按照当前上下文开始自主行动。",
+    "telegramNotice": "Codex Mainline 自主苏醒。",
+    "title": "Codex 节律：",
+    "status": "当前状态：{status}",
+    "statusOn": "开启，{minutes}m",
+    "nextWake": "下次唤醒：{time}",
+    "usage": [
+      "用法：/rhythm 10m",
+      "用法：/rhythm 20m",
+      "用法：/rhythm 60m",
+      "用法：/rhythm on",
+      "用法：/rhythm off"
+    ],
+    "note": "说明：只接受分钟单位 m；修改后立即写回 settings，并重算下次唤醒时间，无需重启。",
+    "unsupported": "不支持这个 rhythm 参数: {value}",
+    "changed": "节律已切换：{from} -> {to}"
+  },
+  "workBudget": {
+    "fallbackPrompt": [
+      "【节律-休息】",
+      "你已经持续工作了一段时间。请先自然收束这一轮，记录必要结果或续作计划，然后停下来休息一会。"
+    ]
+  },
+  "compaction": {
+    "started": "Codex Mainline 正在压缩上下文，稍等一下。",
+    "busy": "Codex Mainline 正在压缩上下文，这条命令暂不执行。请稍后再发一次。",
+    "queued": "Codex Mainline 正在压缩上下文，这条消息已进入队列。压缩完成后会按顺序处理。",
+    "completed": "Codex Mainline 上下文压缩完成了。",
+    "defaultStep": "恢复档位",
+    "failedNext": "Codex Mainline 上下文压缩失败了，正在切到 {step} 继续压缩。",
+    "failed": "Codex Mainline 上下文压缩失败了，正在等待下一步压缩恢复。",
+    "timedOutNext": "Codex Mainline 上下文压缩没有返回完成事件，正在切到 {step} 继续压缩。",
+    "timedOut": "Codex Mainline 上下文压缩没有返回完成事件，正在等待下一步压缩恢复。",
+    "exhausted": "Codex Mainline 上下文压缩连续失败 {maxAttempts} 次，已停止自动重试。建议用 /session new 开新会话，或稍后手动处理旧 session。",
+    "resumePrompt": "【Codex Mainline】: Knock knock，上下文压缩失败链路已经恢复并压缩成功，需要继续任务。",
+    "resumeSourceLabel": "Codex Mainline 压缩恢复",
+    "recoveryPending": "待执行，第 {attempt} 次：{step}",
+    "recoveryOverLimit": "待执行，但已超过自动重试上限",
+    "recoveryActive": "{step} 压缩/恢复默认中",
+    "resumePending": "压缩已恢复，续跑提示待发送",
+    "circuitOpen": "已熔断: {reason}",
+    "none": "无"
+  },
+  "time": {
+    "hours5": "5小时",
+    "days7": "7天",
+    "days": "{value}天",
+    "hours": "{value}小时",
+    "minutes": "{value}分钟",
+    "unknownWindow": "未知周期"
+  },
+  "status": {
+    "title": "Codex Mainline TG 状态",
+    "session": "会话: {thread}",
+    "threadMissing": "(未创建)",
+    "contextNone": "背景信息: 暂无快照（下一次模型事件后更新）",
+    "context": "背景信息: {bar} 剩余 {remaining}%（已使用 {used}/共 {total}）",
+    "snapshot": "快照: {time}",
+    "limitNone": "{label}: 暂无快照",
+    "limit": "{label}: {bar} 剩余 {remaining}%（重置时间: {reset}）",
+    "primaryLimitNone": "5小时限额: 暂无快照",
+    "secondaryLimitNone": "7天限额: 暂无快照",
+    "limitLabel": "{window}限额",
+    "activeTurn": "active turn: {value}",
+    "effort": "effort: {value}",
+    "resting": "resting: {value}",
+    "until": "是，直到 {time}",
+    "notResting": "否",
+    "compacting": "compacting: {value}",
+    "proactiveCompact": "proactive compact at: used >= {percent}%",
+    "compactionRecovery": "compaction recovery: {value}",
+    "nextWake": "next wake: {time}",
+    "lastWake": "last wake: {time}",
+    "wakeCount": "wake count: {count}",
+    "lastWakeSkip": "last wake skip: {value}",
+    "lastVisibleOutput": "last codex visible output: {time}",
+    "lastError": "last error: {value}",
+    "rhythm": "rhythm: {value}"
+  },
+  "effort": {
+    "current": "当前默认 effort: {effort}",
+    "usage": [
+      "用法：/effort low",
+      "用法：/effort medium",
+      "用法：/effort high",
+      "用法：/effort xhigh"
+    ],
+    "note": "说明：这个命令会立即修改 TG 主线后续 turn 的默认思考强度，并写回 settings 文件；正在进行中的 turn 不会被中途改变。",
+    "unsupported": "不支持这个 effort: {value}",
+    "changed": "默认 effort 已切换：{from} -> {to}",
+    "activeTurnNote": "当前正在进行的 turn 不会中途改变；下一轮开始生效。",
+    "nextTurnNote": "下一轮开始生效，无需重启。"
+  },
+  "language": {
+    "current": "当前语言: {locale}",
+    "usage": [
+      "用法：/language zh-CN",
+      "用法：/language en-US"
+    ],
+    "note": "说明：这个命令会立即修改后续桥接层机械输出语言，并写回 settings 文件；正在进行中的 turn 不会被中途改变。",
+    "unsupported": "不支持这个 language: {value}",
+    "changed": "语言已切换：{from} -> {to}",
+    "nextTurnNote": "后续桥接层机械输出会使用新语言。"
+  },
+  "session": {
+    "statusTitle": "Codex session：",
+    "thread": "thread: {thread}",
+    "newThreadNext": "(未创建，下一轮会新建)",
+    "usage": [
+      "用法：/session new",
+      "用法：/session use <thread_id>"
+    ],
+    "note": "说明：只断开当前绑定，让下一轮创建新 Codex thread；旧 session 仍由 Codex App / CLI 原生历史保留。",
+    "invalidThread": "thread_id 格式不对。用法：/session use <thread_id>",
+    "compacting": "Codex Mainline 正在压缩上下文，先不切新 session。",
+    "activeTurn": "Codex Mainline 当前还有一轮回复在进行中。请等这一轮结束后再发送 {command}。",
+    "resumeFailed": "无法恢复这个 thread_id，未切换：{error}",
+    "switched": [
+      "已切换 TG 主线 thread 绑定。",
+      "当前 thread: {current}",
+      "之前 thread: {previous}",
+      "下一条普通消息会进入这个已绑定 session。"
+    ],
+    "cleared": [
+      "已断开当前 TG 主线 thread 绑定。",
+      "旧 thread: {previous}",
+      "下一条普通消息或下一次自主唤醒会创建新的 Codex thread，并重新读取启动文档。",
+      "旧 session 仍在 Codex App / CLI 的原生历史中可见；需要回来时发送：",
+      "{returnCommand}"
+    ]
+  },
+  "history": {
+    "usage": [
+      "用法：/history <关键词>",
+      "说明：搜索 Codex 原生历史 chats / threads，返回标题、时间、thread_id 和正文 snippet。",
+      "切换：复制结果里的 /session use <thread_id>。"
+    ],
+    "untitled": "(未命名 session)",
+    "title": "历史搜索：{query}",
+    "noResults": "没有找到匹配的 Codex session。",
+    "count": "结果：{count} 条",
+    "thread": "   thread: {thread}",
+    "summary": "   摘要：{snippet}",
+    "switch": "   切换：/session use {thread}",
+    "more": "还有更多结果；当前 TG 命令先只取第一页。",
+    "unsupported": "当前运行中的 app-server 还不支持 thread/search。需要重启 TG 主线，让它拉起新版 Codex app-server 后再试 /history <关键词>。",
+    "failed": "历史搜索失败：{error}"
+  },
+  "goal": {
+    "title": "Codex 原生 goal：",
+    "notSet": "当前没有设置。",
+    "usage": [
+      "用法：/goal",
+      "用法：/goal <目标>",
+      "用法：/goal pause",
+      "用法：/goal resume",
+      "用法：/goal edit <新目标>",
+      "用法：/goal clear",
+      "用法：/stop"
+    ],
+    "note1": "说明：这些命令只操作 Codex 原生 goal，不写入 Codex 的长期元目标。",
+    "note2": "说明：/stop 会请求中止当前 turn，并暂停 active goal。",
+    "tokenBudgetUnset": "(未设置)",
+    "status": "状态：{status}",
+    "objective": "目标：{objective}",
+    "objectiveEmpty": "(空)",
+    "elapsed": "耗时：{seconds}s",
+    "updated": "更新：{time}",
+    "readFailed": "读取 goal 失败：{error}",
+    "cleared": "Codex 原生 goal 已清除。",
+    "nothingToClear": "当前没有 Codex thread 或 goal 可清除。",
+    "set": "Codex 原生 goal 已设置。",
+    "paused": "Codex 原生 goal 已暂停。",
+    "nothingToPause": "当前没有 Codex 原生 goal 可暂停。",
+    "resumed": "Codex 原生 goal 已恢复。",
+    "nothingToResume": "当前没有 Codex 原生 goal 可恢复。",
+    "updatedOk": "Codex 原生 goal 已更新。",
+    "nothingToEdit": "当前没有 Codex 原生 goal 可编辑。请用 /goal <目标> 新建。",
+    "failed": "处理 goal 失败：{error}",
+    "needThread": "当前还没有 Codex thread；先发一条普通消息启动会话，再设置 /goal。"
+  },
+  "stop": {
+    "handled": "停止请求已处理。",
+    "interruptFailed": "中止当前 turn 失败：{error}",
+    "interrupted": "已请求中止当前 turn：{turnId}",
+    "noActiveTurn": "当前没有正在进行的 turn。",
+    "pauseFailed": "暂停 active goal 失败：{error}",
+    "pausedGoal": "已同时暂停 active goal，避免自动开启下一轮 pursuit。",
+    "goalStatus": "当前 goal 状态：{status}",
+    "noGoal": "当前没有原生 goal。"
+  },
+  "plan": {
+    "usage": [
+      "用法：/plan <你想规划的内容>",
+      "例如：/plan 做一个番茄牛腩的改良计划。"
+    ],
+    "finished": "计划已生成。你可以直接回复修改意见；若要执行，请用普通消息明确说明。",
+    "activeTurn": "Codex Mainline 当前还有一轮回复在进行中。请等这一轮结束后再发送 /plan <内容>。"
+  },
+  "computer": {
+    "usage": [
+      "用法：/computer <要在 Windows 桌面上执行的任务>",
+      "例如：/computer 把 Telegram 窗口最小化",
+      "",
+      "说明：这个命令会在本轮开头请求 Computer Use 插件，并按官方本地说明连接 Windows 控制接口。"
+    ],
+    "activeTurn": "Codex Mainline 当前还有一轮回复在进行中。请等这一轮结束后再发送 /computer <任务>。",
+    "requestHeader": "【Computer Use 请求】",
+    "requestLine1": "请使用官方 Computer Use 插件处理下面的 Windows 桌面任务。",
+    "requestLine2": "先读取本地 computer-use 插件说明，按官方最小 bootstrap 连接并用 sky.list_apps() 轻量验证；不要在完成 bootstrap 前判断不可用。"
+  },
+  "main": {
+    "dryRunTitle": "Codex Mainline - Dry Run",
+    "dryRunLines": [
+      "locale={locale}",
+      "has_bot_token={hasBotToken}",
+      "allowed_chat_id={allowedChatId}",
+      "telegram_proxy_url={telegramProxyUrl}",
+      "app_server_endpoint={appServerEndpoint}",
+      "model={model}",
+      "service_tier={serviceTier}",
+      "effort={effort}",
+      "bot_commands={botCommands}",
+      "rhythm={rhythm}",
+      "work_budget={workBudget}",
+      "rest={rest}",
+      "state_path={statePath}",
+      "thread_id={threadId}",
+      "next_wake_at={nextWakeAt}"
+    ],
+    "newThreadFirstTurn": "(首轮会新建 thread)",
+    "willArmOnStart": "(启动后会设置)",
+    "startTitle": "Codex Mainline",
+    "started": "Codex Mainline 已启动。",
+    "watchdogLabel": "Watchdog message",
+    "watchdogLog": "Watchdog -> Codex",
+    "unsupportedMessage": "我现在只处理文本消息。",
+    "activeAppendFallback": "刚才尝试追加到上一轮 active turn 失败。现在请把下面这条用户消息作为新的自然对话处理。"
+  }
+}

@@ -1,19 +1,87 @@
 {
   "schema_version": 1,
+  "name": "codex-mainline",
   "locale": "en-US",
-  "model": "gpt-5.5",
-  "effort": "xhigh",
+  "fallback_locale": "en-US",
+  "locales_dir": "locales",
+  "codex_command": "codex",
   "app_server_endpoint": "ws://127.0.0.1:48751",
-  "runtime_dir": "runtime/mainline",
-  "state_path": "runtime/mainline/state.json",
-  "telegram": {
-    "bot_token_env": "CODEX_MAINLINE_TELEGRAM_BOT_TOKEN",
-    "allowed_chat_id_env": "CODEX_MAINLINE_TELEGRAM_ALLOWED_CHAT_ID",
-    "api_proxy_url_env": "CODEX_MAINLINE_TELEGRAM_PROXY_URL"
+  "app_server_fallback_port_scan": 10,
+  "model": "gpt-5.5",
+  "service_tier": null,
+  "effort": "high",
+  "sandbox_mode": "workspace-write",
+  "sandbox_network_access": true,
+  "sandbox_extra_writable_roots": [],
+  "bot_token_env": "CODEX_MAINLINE_TG_BOT_TOKEN",
+  "allowed_chat_id_env": "CODEX_MAINLINE_TG_ALLOWED_CHAT_ID",
+  "telegram_api_proxy_url_env": "CODEX_MAINLINE_TG_PROXY_URL",
+  "telegram_api_proxy_url": null,
+  "pulse_source": "user",
+  "pulse_channel": "telegram_private_chat",
+  "pulse_time_zone": "Asia/Shanghai",
+  "bot_commands_enabled": true,
+  "bot_commands_scope": "chat",
+  "bot_commands": [
+    {
+      "command": "status"
+    },
+    {
+      "command": "effort"
+    },
+    {
+      "command": "language"
+    },
+    {
+      "command": "rhythm"
+    },
+    {
+      "command": "session"
+    },
+    {
+      "command": "history"
+    },
+    {
+      "command": "goal"
+    },
+    {
+      "command": "computer"
+    },
+    {
+      "command": "stop"
+    },
+    {
+      "command": "plan"
+    }
+  ],
+  "local_config_path": "config/telegram.local.json",
+  "state_path": "runtime/tg_mainline/state.json",
+  "runtime_dir": "runtime/tg_mainline",
+  "poll_timeout_seconds": 25,
+  "idle_sleep_seconds": 2,
+  "history_search_limit": 8,
+  "media_group_collect_seconds": 2,
+  "loose_media_collect_seconds": 3,
+  "turn_max_wait_seconds": 2700,
+  "rhythm_enabled": false,
+  "rhythm_interval_seconds": 300,
+  "rhythm_idle_required_seconds": 180,
+  "rhythm_message_path": {
+    "zh-CN": "prompts/rhythm_autonomous_action.zh-CN.md",
+    "en-US": "prompts/rhythm_autonomous_action.en-US.md"
   },
-  "context_compaction": {
-    "trigger_used_percent": 90,
-    "window_seconds": 600,
-    "recovery_max_attempts": 5
-  }
+  "work_budget_seconds": 1800,
+  "work_budget_prompt_path": {
+    "zh-CN": "prompts/work_budget_rest.zh-CN.md",
+    "en-US": "prompts/work_budget_rest.en-US.md"
+  },
+  "rest_seconds": 600,
+  "context_compaction_trigger_used_percent": 90,
+  "compaction_recovery_max_attempts": 5,
+  "compacting_seconds": 600,
+  "compaction_input_queue_path": "runtime/tg_mainline/compaction_input_queue.jsonl",
+  "max_message_chars": 3500,
+  "startup_context_paths": [
+    "docs/operator-context.example.md"
+  ]
 }
