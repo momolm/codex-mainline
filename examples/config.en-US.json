@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "locale": "en-US",
+  "model": "gpt-5.5",
+  "effort": "xhigh",
+  "app_server_endpoint": "ws://127.0.0.1:48751",
+  "runtime_dir": "runtime/mainline",
+  "state_path": "runtime/mainline/state.json",
+  "telegram": {
+    "bot_token_env": "CODEX_MAINLINE_TELEGRAM_BOT_TOKEN",
+    "allowed_chat_id_env": "CODEX_MAINLINE_TELEGRAM_ALLOWED_CHAT_ID",
+    "api_proxy_url_env": "CODEX_MAINLINE_TELEGRAM_PROXY_URL"
+  },
+  "context_compaction": {
+    "trigger_used_percent": 90,
+    "window_seconds": 600,
+    "recovery_max_attempts": 5
+  }
+}
