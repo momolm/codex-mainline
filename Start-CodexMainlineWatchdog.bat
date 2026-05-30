@@ -8,7 +8,8 @@ if errorlevel 1 (
   echo Node.js was not found in PATH.
   echo Install Node.js 20+ and try again.
   echo.
-  pause
+  echo Press any key to close this launcher window...
+  pause >nul
   exit /b 1
 )
 
@@ -16,25 +17,30 @@ if not exist "config\telegram.local.json" (
   echo Missing config\telegram.local.json.
   echo Copy examples\telegram.local.example.json to config\telegram.local.json, then fill bot_token and allowed_chat_id.
   echo.
-  pause
+  echo Press any key to close this launcher window...
+  pause >nul
   exit /b 1
 )
 
-echo Starting Codex Mainline watchdog...
+echo Starting Codex Mainline watchdog in the background...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Start-CodexMainlineWatchdog.ps1" -HiddenWatchdog -HiddenMainline
 set EXITCODE=%ERRORLEVEL%
 
 echo.
 if not "%EXITCODE%"=="0" (
-  echo Watchdog start failed with exit code %EXITCODE%.
+  echo The watchdog did not start. Exit code: %EXITCODE%.
   echo Check runtime\tg_mainline\watchdog.stderr.log for details.
   echo.
-  pause
+  echo Press any key to close this launcher window...
+  pause >nul
   exit /b %EXITCODE%
 )
 
-echo Codex Mainline watchdog was started in the background.
+echo Codex Mainline watchdog is running in the background.
+echo This launcher window can be closed; closing it will not stop Codex Mainline.
+echo To stop both mainline and watchdog, run Stop-CodexMainlineAndWatchdog.bat.
 echo Logs: %~dp0runtime\tg_mainline
 echo.
-pause
+echo Press any key to close this launcher window...
+pause >nul
 exit /b 0
