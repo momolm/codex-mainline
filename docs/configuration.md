@@ -58,7 +58,7 @@ Local file shape:
 - `runtime_dir`: local-only runtime evidence directory.
 - `bot_commands`: slash commands registered with Telegram.
 - `startup_context_paths`: files listed in the startup prompt.
-- `rhythm_enabled`, `rhythm_interval_seconds`, `rhythm_message_path`: optional wake loop.
+- `rhythm_enabled`, `rhythm_interval_seconds`, `rhythm_message_path`: optional wake loop. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
 - `work_budget_seconds`, `work_budget_prompt_path`, `rest_seconds`: long-turn closeout and rest settings.
 - `context_compaction_trigger_used_percent`: proactive compaction threshold.
 - `compaction_recovery_max_attempts`: retry budget after compaction failure.

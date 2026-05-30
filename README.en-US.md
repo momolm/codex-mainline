@@ -223,7 +223,7 @@ Important fields:
 - `runtime_dir`: local-only logs, attachments, generated images, sidecars, locks, and ready files.
 - `bot_commands`: Telegram slash menu registered at startup.
 - `startup_context_paths`: files included in the first startup prompt.
-- `rhythm_*`: optional autonomous wake settings.
+- `rhythm_*`: optional autonomous wake settings. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
 - `work_budget_*`: long-turn closeout settings.
 - `context_compaction_*` and `compacting_*`: compaction trigger, retry, and user-visible behavior.
 

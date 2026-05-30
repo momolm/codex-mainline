@@ -753,16 +753,24 @@ async function telegramApiViaCurl(url, method, payload) {
 
 async function telegramApi(token, method, payload) {
   const url = `https://api.telegram.org/bot${token}/${method}`;
-  const body = TELEGRAM_PROXY_URL
-    ? await telegramApiViaCurl(url, method, payload)
-    : await (async () => {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        return await response.json();
-      })();
+  let body;
+  try {
+    body = TELEGRAM_PROXY_URL
+      ? await telegramApiViaCurl(url, method, payload)
+      : await (async () => {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          return await response.json();
+        })();
+  } catch (error) {
+    const proxyHint = TELEGRAM_PROXY_URL
+      ? `Telegram API request ${method} failed through proxy ${TELEGRAM_PROXY_URL}. Check the proxy URL and network connectivity.`
+      : `Telegram API request ${method} failed. If Telegram Bot API is blocked on this network, set telegram_api_proxy_url in config/telegram.local.json or CODEX_MAINLINE_TG_PROXY_URL.`;
+    throw new Error(`${proxyHint} Original error: ${error?.message || error}`, { cause: error });
+  }
   if (!body.ok) throw new Error(`${method} failed: ${JSON.stringify(body)}`);
   return body.result;
 }
@@ -1580,7 +1588,7 @@ function buildWakePrompt(config) {
 }
 
 function rhythmEnabled(config) {
-  return config.rhythm_enabled !== false;
+  return booleanFromConfig(config, "rhythm_enabled", false);
 }
 
 function rhythmIntervalSeconds(config) {
@@ -4493,7 +4501,7 @@ async function main() {
       rest: `${restSeconds(config)}s`,
       statePath,
       threadId: state.thread_id ?? t(config, "main.newThreadFirstTurn"),
-      nextWakeAt: state.next_wake_at ?? t(config, "main.willArmOnStart"),
+      nextWakeAt: state.next_wake_at ?? (rhythmEnabled(config) ? t(config, "main.willArmOnStart") : t(config, "common.disabled")),
     };
     printHeader(t(config, "main.dryRunTitle"));
     for (const line of tLines(config, "main.dryRunLines", dryRunParams)) {

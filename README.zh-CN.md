@@ -223,7 +223,7 @@ PowerShell 脚本在 `scripts/` 下：
 - `runtime_dir`：仅本地使用的日志、附件、生成图片、sidecar、lock 和 ready 文件目录。
 - `bot_commands`：启动时注册到 Telegram 的 slash menu。
 - `startup_context_paths`：首个启动 prompt 中列出的文件。
-- `rhythm_*`：可选自主唤醒设置。
+- `rhythm_*`：可选自主唤醒设置。`rhythm_enabled` 默认是 `false`；需要时用 `/rhythm on` 或配置显式开启。
 - `work_budget_*`：长 turn 收尾设置。
 - `context_compaction_*` 和 `compacting_*`：压缩触发、重试和用户可见行为。
 
