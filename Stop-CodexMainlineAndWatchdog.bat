@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 
 echo Stopping Codex Mainline and watchdog...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Stop-CodexMainline.ps1" -StopWatchdog -InitialDelaySeconds 0 -StopWaitSeconds 5
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Stop-CodexMainline.ps1" -StopWatchdog -DirectStop -InitialDelaySeconds 0 -StopWaitSeconds 5
 set EXITCODE=%ERRORLEVEL%
 
 echo.
@@ -16,7 +16,7 @@ if not "%EXITCODE%"=="0" (
   exit /b %EXITCODE%
 )
 
-echo Stop-all request was queued. The watchdog will stop the mainline and then exit.
+echo Codex Mainline and watchdog were stopped.
 echo.
 pause
 exit /b 0

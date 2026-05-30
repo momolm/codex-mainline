@@ -105,8 +105,52 @@ try {
         skipped = [bool]$DryRun
     })
 
+    if ($StopWatchdog) {
+        $watchdogLock = Get-CodexMainlineWatchdogLock -Paths $paths
+        $watchdogPids = @()
+        if ($watchdogLock.Alive -and $null -ne $watchdogLock.Pid) {
+            $watchdogPids += [int]$watchdogLock.Pid
+        }
+        try {
+            $watchdogProcesses = Get-CimInstance Win32_Process | Where-Object {
+                $_.CommandLine -and $_.CommandLine.IndexOf($paths.WatchdogScript, [StringComparison]::OrdinalIgnoreCase) -ge 0
+            }
+            foreach ($process in $watchdogProcesses) {
+                if ($process.ProcessId -ne $PID) {
+                    $watchdogPids += [int]$process.ProcessId
+                }
+            }
+        } catch {
+            Write-CodexMainlineJsonl -Path $paths.ShutdownLog -Data ([pscustomobject]@{
+                event = "watchdog_process_scan_failed"
+                error = $_.Exception.Message
+            })
+        }
+
+        $watchdogPids = @($watchdogPids | Sort-Object -Unique)
+        foreach ($watchdogPid in $watchdogPids) {
+            if (-not $DryRun) {
+                Stop-Process -Id $watchdogPid -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if (-not $DryRun -and $watchdogPids.Count -gt 0) {
+            Start-Sleep -Seconds 1
+        }
+        if (-not $DryRun) {
+            Remove-Item -LiteralPath $paths.WatchdogLockPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $paths.WatchdogInstanceLockPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $paths.RestartRequestPath -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "Watchdog stop result: pids=$($watchdogPids -join ',')"
+        Write-CodexMainlineJsonl -Path $paths.ShutdownLog -Data ([pscustomobject]@{
+            event = "watchdog_stop_result"
+            pids = $watchdogPids
+            skipped = [bool]$DryRun
+        })
+    }
+
     if (-not $DryRun) {
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 1
         Remove-Item -LiteralPath $paths.ShutdownMarker -Force -ErrorAction SilentlyContinue
     }
 
@@ -114,7 +158,11 @@ try {
         event = "shutdown_script_exit"
         dry_run = [bool]$DryRun
     })
-    Write-Host "Codex Mainline shutdown script finished. Watchdog will restart mainline if it is enabled."
+    if ($StopWatchdog) {
+        Write-Host "Codex Mainline shutdown script finished. Mainline and watchdog are stopped."
+    } else {
+        Write-Host "Codex Mainline shutdown script finished. Watchdog will restart mainline if it is enabled."
+    }
 }
 catch {
     Write-Host ""
