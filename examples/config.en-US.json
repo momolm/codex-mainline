@@ -76,9 +76,12 @@
     "en-US": "prompts/work_budget_rest.en-US.md"
   },
   "rest_seconds": 600,
-  "context_compaction_trigger_used_percent": 90,
-  "compaction_recovery_max_attempts": 5,
+  "context_compaction_trigger_used_percent": 85,
+  "compaction_recovery_max_attempts": 1,
   "compacting_seconds": 600,
+  "compaction_recovery_pause_prompt": "[Codex Mainline]: Context compaction failed and recovery mode is active. Pause all actions: do not read files, call tools, continue tasks, or start new analysis. Reply only with: paused, waiting for context compaction recovery.",
+  "compaction_recovery_resume_prompt": "[Codex Mainline]: Knock knock. Context compaction recovered successfully; continue the task.",
+  "proactive_compaction_resume_prompt": "[Codex Mainline]: Knock knock. Proactive context compaction completed; continue the task from before compaction.",
   "compaction_input_queue_path": "runtime/tg_mainline/compaction_input_queue.jsonl",
   "max_message_chars": 3500,
   "startup_context_paths": [

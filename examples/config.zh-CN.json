@@ -76,9 +76,12 @@
     "en-US": "prompts/work_budget_rest.en-US.md"
   },
   "rest_seconds": 600,
-  "context_compaction_trigger_used_percent": 90,
-  "compaction_recovery_max_attempts": 5,
+  "context_compaction_trigger_used_percent": 85,
+  "compaction_recovery_max_attempts": 1,
   "compacting_seconds": 600,
+  "compaction_recovery_pause_prompt": "【Codex Mainline】: 上下文压缩失败，当前进入压缩恢复态。请暂停一切行动：不要读取文件，不要调用工具，不要推进任务，不要展开新分析；只简短确认“已暂停，等待上下文压缩恢复”。",
+  "compaction_recovery_resume_prompt": "【Codex Mainline】: Knock knock，从上下文压缩失败中恢复，压缩成功，需要继续任务。",
+  "proactive_compaction_resume_prompt": "【Codex Mainline】: Knock knock，主动上下文压缩完成，需要继续压缩前的任务。",
   "compaction_input_queue_path": "runtime/tg_mainline/compaction_input_queue.jsonl",
   "max_message_chars": 3500,
   "startup_context_paths": [

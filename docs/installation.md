@@ -140,7 +140,7 @@ Supervised background mode:
 Double-click mode:
 
 ```text
-Start-CodexMainline.bat
+Start-CodexMainlineWatchdog.bat
 ```
 
 ## 7. Stop
@@ -148,7 +148,7 @@ Start-CodexMainline.bat
 Stop both mainline and watchdog:
 
 ```text
-Stop-CodexMainline.bat
+Stop-CodexMainlineAndWatchdog.bat
 ```
 
 Or:
@@ -287,11 +287,11 @@ npm start
 或者双击：
 
 ```text
-Start-CodexMainline.bat
+Start-CodexMainlineWatchdog.bat
 ```
 
 关闭主线和 watchdog：
 
 ```text
-Stop-CodexMainline.bat
+Stop-CodexMainlineAndWatchdog.bat
 ```

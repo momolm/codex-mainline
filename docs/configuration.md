@@ -61,7 +61,10 @@ Local file shape:
 - `rhythm_enabled`, `rhythm_interval_seconds`, `rhythm_message_path`: optional wake loop. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
 - `work_budget_seconds`, `work_budget_prompt_path`, `rest_seconds`: long-turn closeout and rest settings.
 - `context_compaction_trigger_used_percent`: proactive compaction threshold.
-- `compaction_recovery_max_attempts`: retry budget after compaction failure.
+- `compaction_recovery_max_attempts`: pause-turn recovery budget after compaction failure.
+- `compaction_recovery_pause_prompt`: short prompt sent on the recovery model after compaction failure.
+- `compaction_recovery_resume_prompt`: prompt sent after failed-compaction recovery succeeds.
+- `proactive_compaction_resume_prompt`: prompt sent after proactive compaction succeeds when no queued user input is waiting.
 
 ## Language Maps
 

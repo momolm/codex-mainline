@@ -8,7 +8,7 @@ It is not a reverse proxy and does not impersonate the Codex desktop app. It run
 
 This repository contains the generic bridge code only. Credentials, runtime logs, chat history, local paths, and project-specific private material are not included.
 
-Current status: initial public code migration with bilingual bridge output support for `zh-CN` and `en-US`.
+Current status: public bridge with bilingual output, watchdog lifecycle scripts, static sticker image input, and context-compaction recovery support.
 
 ## Why This Exists
 
@@ -30,7 +30,7 @@ The result is a three-part decoupling:
 
 - Persistent Codex app-server thread saved in `runtime/tg_mainline/state.json`.
 - Telegram private-chat bridge using Bot API long polling.
-- Message forwarding into the same Codex context, including text, captions, photos, image documents, media groups, and bounded reply/quote context.
+- Message forwarding into the same Codex context, including text, captions, photos, image documents, static stickers, media groups, and bounded reply/quote context.
 - Assistant replies relayed back to Telegram.
 - Explicit local file delivery with `<tg_send_file path="..." />`.
 - Bilingual bridge-layer mechanical output: `zh-CN` and `en-US`.
@@ -48,7 +48,7 @@ The result is a three-part decoupling:
 - Context compaction guard:
   - sends Telegram notices for compaction start/completion/failure/timeout;
   - queues normal messages during compaction;
-  - retries failed compaction recovery with per-turn model/effort overrides;
+  - after a failed compaction, sends a short pause turn with `gpt-5.4-mini low` to trigger native recovery;
   - injects a resume prompt after a failed compaction chain later succeeds.
 - Watchdog supervision for long-running local operation.
 - Optional rhythm wake messages for autonomous follow-up.
@@ -144,25 +144,23 @@ Start supervised on Windows:
 Or double-click:
 
 ```text
-Start-CodexMainline.bat
+Start-CodexMainlineWatchdog.bat
 ```
 
 Stop both mainline and watchdog:
 
 ```text
-Stop-CodexMainline.bat
+Stop-CodexMainlineAndWatchdog.bat
 ```
 
 More detailed setup notes are in [docs/installation.md](docs/installation.md).
 
 ## Windows Entrypoints
 
-The repository root includes double-click entrypoints:
+The repository root exposes two double-click entrypoints:
 
-- `Start-CodexMainline.bat`: starts the watchdog and mainline in the background.
-- `Start-CodexMainlineWatchdog.bat`: explicit watchdog startup entry.
-- `Stop-CodexMainline.bat`: stops the mainline and watchdog.
-- `Stop-CodexMainlineAndWatchdog.bat`: explicit stop-all entry.
+- `Start-CodexMainlineWatchdog.bat`: starts the watchdog and lets it supervise the mainline.
+- `Stop-CodexMainlineAndWatchdog.bat`: stops both the mainline and the watchdog.
 
 The PowerShell scripts live in `scripts/`:
 
@@ -225,7 +223,7 @@ Important fields:
 - `startup_context_paths`: files included in the first startup prompt.
 - `rhythm_*`: optional autonomous wake settings. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
 - `work_budget_*`: long-turn closeout settings.
-- `context_compaction_*` and `compacting_*`: compaction trigger, retry, and user-visible behavior.
+- `context_compaction_*`, `compaction_recovery_*`, and `compacting_*`: compaction trigger, pause-turn recovery, and user-visible behavior.
 
 See [docs/configuration.md](docs/configuration.md) for details.
 
@@ -261,4 +259,5 @@ The bridge removes the marker from visible text, validates the path, and sends i
 - [docs/configuration.md](docs/configuration.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/i18n.md](docs/i18n.md)
+- [docs/codex-field-inheritance.md](docs/codex-field-inheritance.md)
 - [docs/security.md](docs/security.md)

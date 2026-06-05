@@ -18,7 +18,7 @@ if not "%EXITCODE%"=="0" (
 )
 
 echo Codex Mainline and watchdog were stopped.
-echo It is safe to start again with Start-CodexMainline.bat.
+echo It is safe to start again with Start-CodexMainlineWatchdog.bat.
 echo.
 echo Press any key to close this launcher window...
 pause >nul

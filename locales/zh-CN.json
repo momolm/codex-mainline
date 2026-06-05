@@ -28,6 +28,7 @@
     "userToBridge": "用户 -> bridge",
     "codexToUser": "Codex -> 用户",
     "codexPlan": "Codex plan",
+    "mainlineToCodex": "Codex Mainline -> Codex",
     "rhythmToCodex": "节律 -> Codex"
   },
   "startup": {
@@ -99,13 +100,17 @@
     "queued": "Codex Mainline 正在压缩上下文，这条消息已进入队列。压缩完成后会按顺序处理。",
     "completed": "Codex Mainline 上下文压缩完成了。",
     "defaultStep": "恢复档位",
-    "failedNext": "Codex Mainline 上下文压缩失败了，正在切到 {step} 继续压缩。",
+    "failedNext": "Codex Mainline 上下文压缩失败了，正在切到 {step} 发送暂停请求以触发原生压缩恢复。",
     "failed": "Codex Mainline 上下文压缩失败了，正在等待下一步压缩恢复。",
-    "timedOutNext": "Codex Mainline 上下文压缩没有返回完成事件，正在切到 {step} 继续压缩。",
+    "timedOutNext": "Codex Mainline 上下文压缩没有返回完成事件，正在切到 {step} 发送暂停请求以触发原生压缩恢复。",
     "timedOut": "Codex Mainline 上下文压缩没有返回完成事件，正在等待下一步压缩恢复。",
-    "exhausted": "Codex Mainline 上下文压缩连续失败 {maxAttempts} 次，已停止自动重试。建议用 /session new 开新会话，或稍后手动处理旧 session。",
+    "exhausted": "Codex Mainline 上下文压缩恢复请求已尝试 {maxAttempts} 次，已停止自动恢复。后续请求会暂用 gpt-5.4-mini low；压缩成功后恢复默认模型。",
+    "pausePrompt": "【Codex Mainline】: 上下文压缩失败，当前进入压缩恢复态。请暂停一切行动：不要读取文件，不要调用工具，不要推进任务，不要展开新分析；只简短确认“已暂停，等待上下文压缩恢复”。",
+    "pauseSourceLabel": "Codex Mainline 压缩恢复暂停",
     "resumePrompt": "【Codex Mainline】: Knock knock，上下文压缩失败链路已经恢复并压缩成功，需要继续任务。",
+    "proactiveResumePrompt": "【Codex Mainline】: Knock knock，主动上下文压缩完成，需要继续压缩前的任务。",
     "resumeSourceLabel": "Codex Mainline 压缩恢复",
+    "proactiveResumeSourceLabel": "Codex Mainline 主动压缩恢复",
     "recoveryPending": "待执行，第 {attempt} 次：{step}",
     "recoveryOverLimit": "待执行，但已超过自动重试上限",
     "recoveryActive": "{step} 压缩/恢复默认中",
@@ -306,7 +311,8 @@
     "started": "Codex Mainline 已启动。",
     "watchdogLabel": "Watchdog message",
     "watchdogLog": "Watchdog -> Codex",
-    "unsupportedMessage": "我现在只处理文本消息。",
+    "unsupportedMessage": "我现在还不能处理这种 Telegram 消息类型：{kind}。",
+    "unsupportedSticker": "这个表情包是动态/视频 sticker，我现在还不能把它转成可看的图片输入。静态表情包已经可以处理。",
     "activeAppendFallback": "刚才尝试追加到上一轮 active turn 失败。现在请把下面这条用户消息作为新的自然对话处理。"
   }
 }

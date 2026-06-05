@@ -450,15 +450,29 @@ function telegramMessageDate(message) {
   return new Date();
 }
 
-function buildPulseHeader(config, date = new Date()) {
-  const source = optionalString(config?.pulse_source) ?? "user";
-  const channel = optionalString(config?.pulse_channel) ?? "telegram_private_chat";
+function buildPulseHeader(config, date = new Date(), role = {}) {
+  const source = optionalString(role?.source, config?.pulse_source) ?? "user";
+  const channel = optionalString(role?.channel, config?.pulse_channel) ?? "telegram_private_chat";
   const timeZone = optionalString(config?.pulse_time_zone) ?? "Asia/Shanghai";
   return `<pulse time="${escapeXmlAttribute(formatPulseTime(date, timeZone))}" source="${escapeXmlAttribute(source)}" channel="${escapeXmlAttribute(channel)}" />`;
 }
 
 function buildTelegramPulseHeader(config, message) {
   return buildPulseHeader(config, telegramMessageDate(message));
+}
+
+function buildSystemPulseHeader(config, {
+  source = "mainline",
+  channel = "local_event",
+  date = new Date(),
+} = {}) {
+  return buildPulseHeader(config, date, { source, channel });
+}
+
+function withSystemPulseHeader(config, text, options = {}) {
+  const header = buildSystemPulseHeader(config, options);
+  const body = String(text ?? "").trim();
+  return body ? `${header}\n${body}` : header;
 }
 
 function hhmmss(date = new Date()) {
@@ -562,11 +576,13 @@ function defaultState() {
     compacting_item_id: null,
     compaction_recovery_pending: false,
     compaction_recovery_attempt: 0,
+    compaction_recovery_pause_attempt: 0,
     compaction_recovery_model_active: false,
     compaction_recovery_restore_model: null,
     compaction_recovery_restore_effort: null,
     compaction_recovery_restore_in_progress: false,
     compaction_recovery_resume_pending: false,
+    compaction_recovery_resume_reason: null,
     compaction_recovery_resume_last_sent_at: null,
     compaction_last_failed_at: null,
     compaction_last_failed_turn_id: null,
@@ -1072,6 +1088,15 @@ function compactionInputQueuePath(config, runtimeDir) {
   return path.join(runtimeDir, "compaction_input_queue.jsonl");
 }
 
+function countNonBlankLines(filePath) {
+  if (!filePath || !existsSync(filePath)) return 0;
+  try {
+    return readFileSync(filePath, "utf8").split(/\r?\n/).filter((line) => line.trim()).length;
+  } catch {
+    return 0;
+  }
+}
+
 function enqueueCompactionInput({ config, runtimeDir, message, reason }) {
   const queuePath = compactionInputQueuePath(config, runtimeDir);
   appendJsonl(queuePath, {
@@ -1194,6 +1219,10 @@ function imageDescriptorsFromMessage(message) {
   const document = message.document;
   if (document?.file_id && String(document.mime_type || "").startsWith("image/")) {
     images.push({ fileId: document.file_id, fallbackName: document.file_name || "image" });
+  }
+  const sticker = message.sticker;
+  if (sticker?.file_id && !sticker.is_animated && !sticker.is_video) {
+    images.push({ fileId: sticker.file_id, fallbackName: "sticker.webp" });
   }
   return images;
 }
@@ -1367,11 +1396,10 @@ async function buildTelegramInputFromMessages({ token, messages, runtimeDir, con
     return incomingText || (imagePaths.length > 0 ? t(config, "telegramInput.imageOnly") : "");
   })();
 
+  const leadingText = [pulseHeader, replyContext, currentContext].filter(Boolean).join("\n");
   const input = [
-    ...textInput(pulseHeader),
-    ...(replyContext ? textInput(replyContext) : []),
+    ...textInput(leadingText),
     ...replyImagePaths.map((imagePath) => localImageInput(imagePath)),
-    ...(currentContext ? textInput(currentContext) : []),
     ...imagePaths.map((imagePath) => localImageInput(imagePath)),
   ];
   const logText = [
@@ -1669,6 +1697,10 @@ function formatCompactionRecoveryStep(config, step) {
   return `${step.model} ${step.effort}`;
 }
 
+function compactionRecoveryPausePrompt(config) {
+  return localizedConfigText(config, "compaction_recovery_pause_prompt", "compaction.pausePrompt");
+}
+
 function compactingFailedNotice(config, nextStep = null) {
   if (nextStep) {
     return t(config, "compaction.failedNext", { step: formatCompactionRecoveryStep(config, nextStep) });
@@ -1687,30 +1719,38 @@ function compactionRecoveryStep(attempt) {
   const normalizedAttempt = Math.max(1, Math.trunc(Number(attempt || 1)));
   return {
     attempt: normalizedAttempt,
-    model: "gpt-5.4",
-    effort: normalizedAttempt === 1 ? "medium" : "low",
+    model: "gpt-5.4-mini",
+    effort: "low",
   };
 }
 
 function compactionDefaultStep(config) {
   return {
     model: String(config.model || "gpt-5.5"),
-    effort: String(config.effort || "xhigh"),
+    effort: String(config.effort || "high"),
   };
+}
+
+function compactionDegradedStep() {
+  return compactionRecoveryStep(1);
+}
+
+function compactionTurnOverride(state) {
+  return state?.compaction_recovery_model_active ? compactionDegradedStep() : null;
 }
 
 function contextCompactionTriggerUsedPercent(config) {
   const configured = finiteNumber(config.context_compaction_trigger_used_percent);
-  if (configured === null) return 90;
+  if (configured === null) return 85;
   return Math.max(50, Math.min(99, configured));
 }
 
 function compactionRecoveryMaxAttempts(config) {
-  return Math.max(0, Math.trunc(numberFromConfig(config, "compaction_recovery_max_attempts", 5)));
+  return Math.max(0, Math.trunc(numberFromConfig(config, "compaction_recovery_max_attempts", 1)));
 }
 
 function nextCompactionRecoveryStep(state, config) {
-  const currentAttempt = Math.max(0, Math.trunc(Number(state?.compaction_recovery_attempt || 0)));
+  const currentAttempt = Math.max(0, Math.trunc(Number(state?.compaction_recovery_pause_attempt || 0)));
   const nextAttempt = currentAttempt + 1;
   const maxAttempts = compactionRecoveryMaxAttempts(config);
   if (nextAttempt > maxAttempts) return null;
@@ -1723,6 +1763,16 @@ function compactionRecoveryExhaustedNotice(config, maxAttempts) {
 
 function compactionRecoveryResumePrompt(config) {
   return localizedConfigText(config, "compaction_recovery_resume_prompt", "compaction.resumePrompt");
+}
+
+function proactiveCompactionResumePrompt(config) {
+  return localizedConfigText(config, "proactive_compaction_resume_prompt", "compaction.proactiveResumePrompt");
+}
+
+function compactionResumePrompt(config, reason) {
+  return reason === "proactive"
+    ? proactiveCompactionResumePrompt(config)
+    : compactionRecoveryResumePrompt(config);
 }
 
 function contextUsageUsedPercent(snapshot) {
@@ -2044,8 +2094,8 @@ function formatRateLimitLines(config, snapshot) {
 
 function formatMainlineStatus(state, config) {
   const pendingRecoveryStep = nextCompactionRecoveryStep(state, config);
-  const activeRecoveryStep = state.compaction_recovery_attempt
-    ? compactionRecoveryStep(state.compaction_recovery_attempt)
+  const activeRecoveryStep = state.compaction_recovery_pause_attempt
+    ? compactionRecoveryStep(state.compaction_recovery_pause_attempt)
     : null;
   const recoveryStatus = state.compaction_recovery_pending
     ? pendingRecoveryStep
@@ -2057,7 +2107,7 @@ function formatMainlineStatus(state, config) {
     : state.compaction_recovery_model_active
       ? t(config, "compaction.recoveryActive", { step: formatCompactionRecoveryStep(config, activeRecoveryStep) })
       : state.compaction_recovery_resume_pending
-        ? t(config, "compaction.resumePending")
+        ? t(config, "compaction.resumePending", { reason: state.compaction_recovery_resume_reason ?? "" })
       : state.compaction_circuit_opened_at
         ? t(config, "compaction.circuitOpen", { reason: state.compaction_circuit_reason ?? t(config, "common.unknown") })
         : t(config, "compaction.none");
@@ -2430,11 +2480,13 @@ function resetThreadBindingForNewSession({ statePath, state }) {
     compacting_item_id: null,
     compaction_recovery_pending: false,
     compaction_recovery_attempt: 0,
+    compaction_recovery_pause_attempt: 0,
     compaction_recovery_model_active: false,
     compaction_recovery_restore_model: null,
     compaction_recovery_restore_effort: null,
     compaction_recovery_restore_in_progress: false,
     compaction_recovery_resume_pending: false,
+    compaction_recovery_resume_reason: null,
     compaction_recovery_resume_last_sent_at: null,
     compaction_last_failed_at: null,
     compaction_last_failed_turn_id: null,
@@ -2463,11 +2515,13 @@ function bindExistingThread({ statePath, state, threadId }) {
     compacting_item_id: null,
     compaction_recovery_pending: false,
     compaction_recovery_attempt: 0,
+    compaction_recovery_pause_attempt: 0,
     compaction_recovery_model_active: false,
     compaction_recovery_restore_model: null,
     compaction_recovery_restore_effort: null,
     compaction_recovery_restore_in_progress: false,
     compaction_recovery_resume_pending: false,
+    compaction_recovery_resume_reason: null,
     compaction_recovery_resume_last_sent_at: null,
     compaction_last_failed_at: null,
     compaction_last_failed_turn_id: null,
@@ -2785,7 +2839,7 @@ class MainlineSession {
       onNotification: (message) => this.handleNotification(message),
     });
     await this.rpc.request("initialize", {
-      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.1" },
+      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.2" },
       capabilities: { experimentalApi: true, optOutNotificationMethods: [] },
     });
     logSystem("app-server websocket connected");
@@ -2938,7 +2992,7 @@ class MainlineSession {
     return { interrupted: true, turnId: this.state.active_turn_id };
   }
 
-  async startContextCompaction({ model = null, effort = null } = {}) {
+  async startContextCompaction({ model = null, effort = null, resumeReason = null } = {}) {
     const threadId = await this.ensureThread({ model });
     const configOverride = {};
     if (model) configOverride.model = String(model);
@@ -2958,11 +3012,17 @@ class MainlineSession {
       });
     }
     const now = new Date();
-    patchState(this.statePath, this.state, {
+    const statePatch = {
       compacting_started_at: iso(now),
       compacting_until: addSeconds(now, compactingSeconds(this.config)).toISOString(),
       compacting_item_id: "compact-start-requested",
-    });
+    };
+    if (resumeReason) {
+      statePatch.compaction_recovery_resume_pending = true;
+      statePatch.compaction_recovery_resume_reason = String(resumeReason);
+      statePatch.compaction_recovery_resume_last_sent_at = null;
+    }
+    patchState(this.statePath, this.state, statePatch);
     await this.rpc.request("thread/compact/start", { threadId });
     return { threadId };
   }
@@ -3034,7 +3094,10 @@ class MainlineSession {
     computerUse = false,
     typingIndicator = false,
   } = {}) {
-    const overrides = { model, effort };
+    const degradedStep = compactionTurnOverride(this.state);
+    const effectiveModel = model ?? degradedStep?.model ?? null;
+    const effectiveEffort = effort ?? degradedStep?.effort ?? null;
+    const overrides = { model: effectiveModel, effort: effectiveEffort };
     const threadId = await this.ensureThread(overrides);
     const prompt = startup ? buildStartupInput(this.config, userInput, startupSourceLabel) : userInput;
     const maxWaitMs = numberFromConfig(this.config, "turn_max_wait_seconds", 1800) * 1000;
@@ -3043,8 +3106,8 @@ class MainlineSession {
     let result;
     try {
       result = await this.rpc.request("turn/start", this.turnParams(threadId, prompt, {
-        model,
-        effort,
+        model: effectiveModel,
+        effort: effectiveEffort,
         collaborationMode: this.collaborationMode("default", overrides),
       }));
     } catch (error) {
@@ -3105,7 +3168,7 @@ class MainlineSession {
     const threadId = await this.ensureThread();
     const maxWaitMs = numberFromConfig(this.config, "turn_max_wait_seconds", 1800) * 1000;
     this.prepareTurnWait(maxWaitMs);
-    const result = await this.rpc.request("turn/start", this.turnParams(threadId, buildWakePrompt(this.config), {
+    const result = await this.rpc.request("turn/start", this.turnParams(threadId, withSystemPulseHeader(this.config, buildWakePrompt(this.config)), {
       collaborationMode: this.collaborationMode("default"),
     }));
     const turnId = result.turn?.id;
@@ -3495,11 +3558,28 @@ class MainlineSession {
     logSystem(`context compaction started: ${item?.id ?? "(unknown)"}`);
     this.ensureRunDetailsStarted(t(this.config, "runDetails.contextCompaction"));
     this.appendRunDetail(`context compaction started: ${item?.id ?? "(unknown)"}`);
-    patchState(this.statePath, this.state, {
+    const statePatch = {
       compacting_started_at: iso(now),
       compacting_until: until,
       compacting_item_id: item?.id ?? null,
-    });
+    };
+    if (!this.state.compaction_recovery_model_active) {
+      Object.assign(statePatch, {
+        compaction_recovery_pending: false,
+        compaction_recovery_attempt: 0,
+        compaction_recovery_pause_attempt: 0,
+        compaction_recovery_model_active: false,
+        compaction_recovery_restore_model: null,
+        compaction_recovery_restore_effort: null,
+        compaction_recovery_restore_in_progress: false,
+        compaction_last_failed_at: null,
+        compaction_last_failed_turn_id: null,
+        compaction_last_error: null,
+        compaction_circuit_opened_at: null,
+        compaction_circuit_reason: null,
+      });
+    }
+    patchState(this.statePath, this.state, statePatch);
     this.relayToTelegram(compactingStartedNotice(this.config));
   }
 
@@ -3514,6 +3594,7 @@ class MainlineSession {
       compacting_item_id: null,
       compaction_recovery_pending: false,
       compaction_recovery_attempt: 0,
+      compaction_recovery_pause_attempt: 0,
       compaction_recovery_restore_in_progress: shouldRestoreDefaultModel,
       compaction_last_error: null,
       compaction_last_failed_turn_id: null,
@@ -3565,6 +3646,7 @@ class MainlineSession {
       compaction_recovery_pending: true,
       compaction_recovery_restore_in_progress: false,
       compaction_recovery_resume_pending: true,
+      compaction_recovery_resume_reason: "recovery",
       compaction_recovery_resume_last_sent_at: null,
       compaction_last_failed_at: iso(),
       compaction_last_failed_turn_id: failedTurnId,
@@ -3587,6 +3669,7 @@ class MainlineSession {
       compaction_recovery_pending: true,
       compaction_recovery_restore_in_progress: false,
       compaction_recovery_resume_pending: true,
+      compaction_recovery_resume_reason: "recovery",
       compaction_recovery_resume_last_sent_at: null,
       compaction_last_failed_at: iso(),
       compaction_last_error: reason,
@@ -4003,7 +4086,7 @@ async function handleText({ session, config, state, statePath, text, startup, st
       logSystem(`active turn append failed; starting a new turn instead: ${error.message || error}`);
       patchState(statePath, state, { active_turn_id: null, active_turn_started_at: null, active_turn_computer_use: false });
       return await session.startTurn([
-        t(config, "main.activeAppendFallback"),
+        withSystemPulseHeader(config, t(config, "main.activeAppendFallback")),
         "",
         text,
       ].join("\n"), { startup, startupSourceLabel, typingIndicator: true });
@@ -4022,7 +4105,7 @@ async function handleInput({ session, state, statePath, input, startup }) {
     } catch (error) {
       logSystem(`active turn append failed; starting a new turn instead: ${error.message || error}`);
       patchState(statePath, state, { active_turn_id: null, active_turn_started_at: null, active_turn_computer_use: false });
-      const fallback = textInput("Active turn append failed. Please handle the following User message naturally as a new turn.");
+      const fallback = textInput(withSystemPulseHeader(session.config, t(session.config, "main.activeAppendFallback")));
       return await session.startTurn([...fallback, ...inputItems(input)], { startup, typingIndicator: true });
     }
   }
@@ -4179,7 +4262,7 @@ async function maybeRunWorkBudget({ session, config, state, statePath }) {
   const budgetMs = workBudgetSeconds(config) * 1000;
   if (Date.now() - startedAt < budgetMs) return false;
 
-  const prompt = workBudgetPrompt(config);
+  const prompt = withSystemPulseHeader(config, workBudgetPrompt(config));
   try {
     await session.steer(prompt);
   } catch (error) {
@@ -4239,34 +4322,24 @@ async function maybeRunCompactionRecovery({ session, config, state, statePath })
   if (state.active_turn_id) return null;
   if (isCompacting(state)) return null;
 
-  const currentAttempt = Math.max(0, Math.trunc(Number(state.compaction_recovery_attempt || 0)));
+  const currentAttempt = Math.max(0, Math.trunc(Number(state.compaction_recovery_pause_attempt || 0)));
   const nextAttempt = currentAttempt + 1;
   const maxAttempts = compactionRecoveryMaxAttempts(config);
   if (nextAttempt > maxAttempts) {
     const reason = `context compaction recovery exhausted after ${currentAttempt} attempts`;
     logSystem(reason);
-    let restoreError = null;
-    if (state.compaction_recovery_model_active) {
-      try {
-        await session.restoreDefaultModelForThread();
-      } catch (error) {
-        restoreError = error;
-        appendJsonl(path.join(session.runtimeDir, "errors.jsonl"), { error: error?.stack || String(error) });
-        logSystem(`default model restore after exhausted recovery failed: ${error.message || error}`);
-      }
-    }
+    const restoreStep = compactionDefaultStep(config);
     patchState(statePath, state, {
       compaction_recovery_pending: false,
-      compaction_recovery_model_active: false,
-      compaction_recovery_restore_model: null,
-      compaction_recovery_restore_effort: null,
+      compaction_recovery_model_active: true,
+      compaction_recovery_restore_model: restoreStep.model,
+      compaction_recovery_restore_effort: restoreStep.effort,
       compaction_recovery_restore_in_progress: false,
       compaction_recovery_resume_pending: false,
+      compaction_recovery_resume_reason: null,
       compaction_recovery_resume_last_sent_at: null,
       compaction_circuit_opened_at: iso(),
-      compaction_circuit_reason: restoreError
-        ? `${reason}; default restore failed: ${restoreError?.message || restoreError}`
-        : reason,
+      compaction_circuit_reason: reason,
       last_error: reason,
     });
     session.relayToTelegram(compactionRecoveryExhaustedNotice(config, maxAttempts));
@@ -4274,24 +4347,55 @@ async function maybeRunCompactionRecovery({ session, config, state, statePath })
   }
   const step = compactionRecoveryStep(nextAttempt);
   const restoreStep = compactionDefaultStep(config);
-  logSystem(`context compaction recovery direct compact: attempt=${nextAttempt}, model=${step.model}, effort=${step.effort}`);
+  const promptBody = compactionRecoveryPausePrompt(config);
+  const prompt = withSystemPulseHeader(config, promptBody);
+  logSystem(`context compaction recovery pause turn: attempt=${nextAttempt}, model=${step.model}, effort=${step.effort}`);
+  logBlock(t(config, "log.mainlineToCodex"), prompt);
+  appendJsonl(path.join(session.runtimeDir, "telegram.jsonl"), {
+    direction: "compaction_recovery_pause",
+    attempt: nextAttempt,
+    model: step.model,
+    effort: step.effort,
+    chars: prompt.length,
+  });
   patchState(statePath, state, {
     compaction_recovery_pending: false,
     compaction_recovery_attempt: nextAttempt,
+    compaction_recovery_pause_attempt: nextAttempt,
     compaction_recovery_model_active: true,
     compaction_recovery_restore_model: restoreStep.model,
     compaction_recovery_restore_effort: restoreStep.effort,
     compaction_recovery_restore_in_progress: false,
+    compaction_recovery_resume_pending: true,
+    compaction_recovery_resume_reason: "recovery",
+    compaction_recovery_resume_last_sent_at: null,
+    last_error: null,
   });
   try {
-    await session.startContextCompaction({
+    return await session.startTurn(prompt, {
       model: step.model,
       effort: step.effort,
+      startup: !state.thread_id,
+      startupSourceLabel: t(config, "compaction.pauseSourceLabel"),
+      typingIndicator: false,
     });
   } catch (error) {
-    session.noteContextCompactionFailed(`recovery compact start failed: ${error?.message || error}`);
+    const message = error?.stack || String(error);
+    const reason = `recovery pause turn failed: ${error?.message || error}`;
+    patchState(statePath, state, {
+      compaction_recovery_pending: false,
+      compaction_recovery_resume_pending: false,
+      compaction_recovery_resume_reason: null,
+      compaction_recovery_resume_last_sent_at: null,
+      compaction_circuit_opened_at: iso(),
+      compaction_circuit_reason: reason,
+      last_error: message,
+    });
+    appendJsonl(path.join(session.runtimeDir, "errors.jsonl"), { error: message });
+    logSystem(reason);
+    session.relayToTelegram(compactionRecoveryExhaustedNotice(config, nextAttempt));
+    return null;
   }
-  return null;
 }
 
 async function maybeRunCompactionRecoveryResume({ session, config, state, statePath }) {
@@ -4301,22 +4405,38 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
   if (state.compaction_recovery_model_active || state.compaction_recovery_restore_in_progress) return null;
   if (isCompacting(state) || state.compacting_until) return null;
 
-  const prompt = compactionRecoveryResumePrompt(config).trim();
-  if (!prompt) {
+  const reason = String(state.compaction_recovery_resume_reason || "recovery");
+  if (reason === "proactive" && countNonBlankLines(compactionInputQueuePath(config, session.runtimeDir)) > 0) {
+    logSystem("proactive compaction resume skipped: queued TG input will continue");
     patchState(statePath, state, {
       compaction_recovery_resume_pending: false,
+      compaction_recovery_resume_reason: null,
       compaction_recovery_resume_last_sent_at: null,
+      last_error: null,
     });
     return null;
   }
 
-  logBlock("Codex Mainline -> Codex", prompt);
+  const promptBody = compactionResumePrompt(config, reason).trim();
+  if (!promptBody) {
+    patchState(statePath, state, {
+      compaction_recovery_resume_pending: false,
+      compaction_recovery_resume_reason: null,
+      compaction_recovery_resume_last_sent_at: null,
+    });
+    return null;
+  }
+  const prompt = withSystemPulseHeader(config, promptBody);
+
+  logBlock(t(config, "log.mainlineToCodex"), prompt);
   appendJsonl(path.join(session.runtimeDir, "telegram.jsonl"), {
-    direction: "compaction_recovery_resume",
+    direction: reason === "proactive" ? "compaction_proactive_resume" : "compaction_recovery_resume",
+    reason,
     chars: prompt.length,
   });
   patchState(statePath, state, {
     compaction_recovery_resume_pending: false,
+    compaction_recovery_resume_reason: null,
     compaction_recovery_resume_last_sent_at: iso(),
     last_error: null,
   });
@@ -4324,13 +4444,16 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
   try {
     return await session.startTurn(prompt, {
       startup: !state.thread_id,
-      startupSourceLabel: t(config, "compaction.resumeSourceLabel"),
+      startupSourceLabel: reason === "proactive"
+        ? t(config, "compaction.proactiveResumeSourceLabel")
+        : t(config, "compaction.resumeSourceLabel"),
       typingIndicator: false,
     });
   } catch (error) {
     const message = error?.stack || String(error);
     patchState(statePath, state, {
       compaction_recovery_resume_pending: true,
+      compaction_recovery_resume_reason: reason,
       last_error: message,
     });
     appendJsonl(path.join(session.runtimeDir, "errors.jsonl"), { error: message });
@@ -4343,14 +4466,49 @@ async function maybeRunProactiveContextCompaction({ session, config, state }) {
   if (!shouldStartProactiveCompaction(state, config)) return false;
   const usedPercent = Math.round(contextUsageUsedPercent(state.context_usage_snapshot) ?? 0);
   const threshold = contextCompactionTriggerUsedPercent(config);
+  const step = compactionTurnOverride(state) ?? compactionDefaultStep(config);
   logSystem(`proactive context compaction triggered: used=${usedPercent}%, threshold=${threshold}%`);
   try {
-    await session.startContextCompaction();
+    await session.startContextCompaction({
+      model: step.model,
+      effort: step.effort,
+      resumeReason: "proactive",
+    });
     return true;
   } catch (error) {
     session.noteContextCompactionFailed(`proactive compact start failed: ${error?.message || error}`);
     return false;
   }
+}
+
+async function maybePreemptInputWithProactiveCompaction({
+  session,
+  config,
+  state,
+  runtimeDir,
+  message,
+  token,
+  chatId,
+  maxChars,
+}) {
+  if (!shouldStartProactiveCompaction(state, config)) return false;
+  const queuePath = enqueueCompactionInput({
+    config,
+    runtimeDir,
+    message,
+    reason: "proactive_before_input",
+  });
+  logSystem(`message queued before proactive compaction: queue=${queuePath}`);
+  await maybeRunProactiveContextCompaction({ session, config, state });
+  await sendText({
+    token,
+    chatId,
+    text: compactingQueuedNotice(config),
+    maxChars,
+    runtimeDir,
+    echo: true,
+  });
+  return true;
 }
 
 async function maybeRunCompactionQueuedInputs({ session, config, state, statePath, token, runtimeDir }) {
@@ -4436,7 +4594,7 @@ async function maybeRunRhythm({ session, config, state, statePath, token, chatId
     }
   }
 
-  const message = rhythmMessage(config);
+  const message = withSystemPulseHeader(config, rhythmMessage(config));
   const notice = rhythmTelegramNotice(config);
   if (notice) {
     await sendText({
@@ -4611,13 +4769,14 @@ async function main() {
 
   if (options.startupMessage && !compactionLocked) {
     logSystem("startup message requested by launcher");
-    logBlock(t(config, "main.watchdogLog"), options.startupMessage);
+    const startupMessage = withSystemPulseHeader(config, options.startupMessage);
+    logBlock(t(config, "main.watchdogLog"), startupMessage);
     const turn = await handleText({
       session,
       config,
       state,
       statePath,
-      text: options.startupMessage,
+      text: startupMessage,
       startup: !state.thread_id,
       startupSourceLabel: t(config, "main.watchdogLabel"),
     });
@@ -5445,6 +5604,20 @@ async function main() {
           continue;
         }
 
+        state = reloadState();
+        if (await maybePreemptInputWithProactiveCompaction({
+          session,
+          config,
+          state,
+          runtimeDir,
+          message,
+          token: secrets.token,
+          chatId: secrets.allowedChatId,
+          maxChars,
+        })) {
+          continue;
+        }
+
         if (telegramMediaGroupId(message)) {
           queueMediaGroupMessage({
             pendingMediaGroups,
@@ -5482,10 +5655,14 @@ async function main() {
           continue;
         }
         if (typeof message.text !== "string") {
+          const kind = telegramMessageKind(message);
+          const text = kind === "sticker"
+            ? t(config, "main.unsupportedSticker")
+            : t(config, "main.unsupportedMessage", { kind });
           await sendText({
             token: secrets.token,
             chatId: secrets.allowedChatId,
-            text: t(config, "main.unsupportedMessage"),
+            text,
             maxChars,
             runtimeDir,
             echo: true,

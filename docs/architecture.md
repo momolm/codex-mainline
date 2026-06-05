@@ -8,14 +8,14 @@ It is not a reverse proxy. It does not emulate a model API or scrape an app UI. 
 
 ## Components
 
-- Telegram transport: receives allowed private-chat messages and sends visible replies.
+- Telegram transport: receives allowed private-chat messages, downloads supported image inputs including static stickers, and sends visible replies.
 - Codex session client: connects to the app-server websocket, resumes or starts a thread, and starts turns.
 - App-server launcher: starts `codex app-server --listen <endpoint>` through Codex CLI when the configured endpoint is not already ready.
 - State store: keeps thread ID, update offset, active turn ID, compaction state, wake state, and rate/context snapshots.
 - I18n catalog: loads bridge-layer mechanical output from `locales/<locale>.json`.
 - Runtime logs: compact JSONL diagnostics, not documentation or source of truth.
 - File delivery: extracts `<tg_send_file path="..." />`, validates local paths, and sends Telegram photos/documents.
-- Compaction guard: watches context usage, starts compaction, handles failure/timeout, queues input, and resumes work after recovery.
+- Compaction guard: watches context usage, starts compaction, queues input, sends pause-turn recovery after failure/timeout, and resumes work after recovery.
 - PowerShell process layer: starts/stops the Node runner and supervises it with a watchdog on Windows.
 
 ## Principles

@@ -8,7 +8,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 
 这个仓库只包含通用桥接代码。不包含凭据、运行日志、聊天历史、本地路径或项目私有资料。
 
-当前状态：初始公开代码迁移版本，桥接层固定输出支持 `zh-CN` 和 `en-US`。
+当前状态：公开桥接版本，支持双语桥接输出、watchdog 生命周期脚本、静态 sticker 图片输入和上下文压缩恢复。
 
 ## 为什么需要它
 
@@ -30,7 +30,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 
 - 持久 Codex app-server thread，保存在 `runtime/tg_mainline/state.json`。
 - 基于 Bot API long polling 的 Telegram 私聊桥接。
-- 把消息转入同一个 Codex 上下文，包括文本、caption、照片、图片文档、媒体组和有边界的回复 / 引用上下文。
+- 把消息转入同一个 Codex 上下文，包括文本、caption、照片、图片文档、静态 sticker、媒体组和有边界的回复 / 引用上下文。
 - 将 assistant 回复转发回 Telegram。
 - 通过 `<tg_send_file path="..." />` 显式交付本地文件。
 - 桥接层机械输出支持双语：`zh-CN` 和 `en-US`。
@@ -48,7 +48,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 - 上下文压缩保护：
   - 发送压缩开始 / 完成 / 失败 / 超时的 Telegram 通知；
   - 压缩期间对普通消息排队；
-  - 压缩恢复失败后使用逐轮 model / effort override 重试；
+  - 压缩失败后使用 `gpt-5.4-mini low` 发送短暂停 turn，以触发原生压缩恢复；
   - 失败链路之后如果压缩恢复成功，会注入继续任务的恢复提示。
 - 面向长期本地运行的 watchdog 监督。
 - 可选的自主跟进节律唤醒消息。
@@ -144,25 +144,23 @@ npm start
 也可以双击：
 
 ```text
-Start-CodexMainline.bat
+Start-CodexMainlineWatchdog.bat
 ```
 
 停止 mainline 和 watchdog：
 
 ```text
-Stop-CodexMainline.bat
+Stop-CodexMainlineAndWatchdog.bat
 ```
 
 更详细的安装说明见 [docs/installation.md](docs/installation.md)。
 
 ## Windows 入口
 
-仓库根目录包含可双击入口：
+仓库根目录只暴露两个可双击入口：
 
-- `Start-CodexMainline.bat`：在后台启动 watchdog 和 mainline。
-- `Start-CodexMainlineWatchdog.bat`：显式 watchdog 启动入口。
-- `Stop-CodexMainline.bat`：停止 mainline 和 watchdog。
-- `Stop-CodexMainlineAndWatchdog.bat`：显式 stop-all 入口。
+- `Start-CodexMainlineWatchdog.bat`：启动 watchdog，并由 watchdog 监督 mainline。
+- `Stop-CodexMainlineAndWatchdog.bat`：同时停止 mainline 和 watchdog。
 
 PowerShell 脚本在 `scripts/` 下：
 
@@ -225,7 +223,7 @@ PowerShell 脚本在 `scripts/` 下：
 - `startup_context_paths`：首个启动 prompt 中列出的文件。
 - `rhythm_*`：可选自主唤醒设置。`rhythm_enabled` 默认是 `false`；需要时用 `/rhythm on` 或配置显式开启。
 - `work_budget_*`：长 turn 收尾设置。
-- `context_compaction_*` 和 `compacting_*`：压缩触发、重试和用户可见行为。
+- `context_compaction_*`、`compaction_recovery_*` 和 `compacting_*`：压缩触发、暂停 turn 恢复和用户可见行为。
 
 详见 [docs/configuration.md](docs/configuration.md)。
 
@@ -261,4 +259,5 @@ PowerShell 脚本在 `scripts/` 下：
 - [docs/configuration.md](docs/configuration.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/i18n.md](docs/i18n.md)
+- [docs/codex-field-inheritance.md](docs/codex-field-inheritance.md)
 - [docs/security.md](docs/security.md)

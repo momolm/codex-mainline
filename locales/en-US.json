@@ -28,6 +28,7 @@
     "userToBridge": "user -> bridge",
     "codexToUser": "Codex -> user",
     "codexPlan": "Codex plan",
+    "mainlineToCodex": "Codex Mainline -> Codex",
     "rhythmToCodex": "rhythm -> Codex"
   },
   "startup": {
@@ -99,13 +100,17 @@
     "queued": "Codex Mainline is compacting context. This message has been queued and will be processed in order after compaction completes.",
     "completed": "Codex Mainline context compaction completed.",
     "defaultStep": "recovery setting",
-    "failedNext": "Codex Mainline context compaction failed. Switching to {step} and continuing compaction.",
+    "failedNext": "Codex Mainline context compaction failed. Switching to {step} and sending a pause turn to trigger native compaction recovery.",
     "failed": "Codex Mainline context compaction failed and is waiting for the next recovery step.",
-    "timedOutNext": "Codex Mainline context compaction did not emit a completion event. Switching to {step} and continuing compaction.",
+    "timedOutNext": "Codex Mainline context compaction did not emit a completion event. Switching to {step} and sending a pause turn to trigger native compaction recovery.",
     "timedOut": "Codex Mainline context compaction did not emit a completion event and is waiting for the next recovery step.",
-    "exhausted": "Codex Mainline context compaction failed {maxAttempts} times in a row and automatic retry has stopped. Use /session new for a fresh session, or handle the old session manually later.",
+    "exhausted": "Codex Mainline context compaction recovery was attempted {maxAttempts} time(s) and automatic recovery has stopped. Later turns will temporarily use gpt-5.4-mini low; the default model is restored after compaction succeeds.",
+    "pausePrompt": "[Codex Mainline]: Context compaction failed and recovery mode is active. Pause all actions: do not read files, call tools, continue tasks, or start new analysis. Reply only with: paused, waiting for context compaction recovery.",
+    "pauseSourceLabel": "Codex Mainline compaction recovery pause",
     "resumePrompt": "[Codex Mainline]: Knock knock. The failed context-compaction chain has recovered and compaction succeeded; continue the task.",
+    "proactiveResumePrompt": "[Codex Mainline]: Knock knock. Proactive context compaction completed; continue the task from before compaction.",
     "resumeSourceLabel": "Codex Mainline compaction recovery",
+    "proactiveResumeSourceLabel": "Codex Mainline proactive compaction recovery",
     "recoveryPending": "pending, attempt {attempt}: {step}",
     "recoveryOverLimit": "pending, but automatic retry limit has been exceeded",
     "recoveryActive": "{step} compaction/default restore in progress",
@@ -306,7 +311,8 @@
     "started": "Codex Mainline started.",
     "watchdogLabel": "Watchdog message",
     "watchdogLog": "Watchdog -> Codex",
-    "unsupportedMessage": "I currently only handle text messages.",
+    "unsupportedMessage": "I cannot handle this Telegram message type yet: {kind}.",
+    "unsupportedSticker": "This sticker is animated/video, so it cannot be converted into an image input yet. Static stickers are supported.",
     "activeAppendFallback": "Appending to the previous active turn failed. Please handle the following user message naturally as a new turn."
   }
 }
