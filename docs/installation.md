@@ -143,6 +143,18 @@ Double-click mode:
 Start-CodexMainlineWatchdog.bat
 ```
 
+Optional logon startup:
+
+```powershell
+.\scripts\Install-CodexMainlineStartup.ps1 -UseScheduledTask
+```
+
+This registers the watchdog at logon with highest privileges. To remove the startup entry:
+
+```powershell
+.\scripts\Install-CodexMainlineStartup.ps1 -Remove
+```
+
 ## 7. Stop
 
 Stop both mainline and watchdog:
@@ -288,6 +300,18 @@ npm start
 
 ```text
 Start-CodexMainlineWatchdog.bat
+```
+
+可选：安装开机自启：
+
+```powershell
+.\scripts\Install-CodexMainlineStartup.ps1 -UseScheduledTask
+```
+
+这会用最高权限在登录时启动 watchdog。卸载：
+
+```powershell
+.\scripts\Install-CodexMainlineStartup.ps1 -Remove
 ```
 
 关闭主线和 watchdog：

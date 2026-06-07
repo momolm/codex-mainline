@@ -116,6 +116,23 @@ First loop:
 
 Add autonomy, daily logs, and richer tools after the first loop proves useful.
 
+## Mobile Base Deployment
+
+When a new Codex workspace needs its own durable field, unfold it in this order:
+
+1. Create the smallest useful directory set: `README.md`, `memory/memory.md`, `handoff/handoff.md`, `todo/TODO.md`, `tools/README.md`, and `archive/`.
+2. Write `README.md` with the field purpose, startup read order, directory responsibilities, and boundaries.
+3. Write the first `memory.md` with stable facts, collaboration preferences, boundaries, and verified procedures.
+4. Write the first `handoff.md` with the current task, completed work, unfinished work, and next step.
+5. Write the first `TODO.md` with a small active set that can be handled soon.
+6. Keep `archive/` available from day one.
+7. Start `tools/` with notes first, then add scripts only after they prove reusable.
+8. Complete one real task through the field: read context, act, verify, and record the result.
+9. Put the result into the right layer: memory, daily log, handoff, todo, docs, tools, archive, or runtime.
+10. After several successful loops, add autonomy files, richer plans, permission rules, and rhythm policies.
+
+The field should grow from a working loop. Prove continuity first, then add structure.
+
 ## Anti-Patterns
 
 - Treating the project README as the agent's memory.

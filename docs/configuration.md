@@ -65,6 +65,7 @@ Local file shape:
 - `compaction_recovery_pause_prompt`: short prompt sent on the recovery model after compaction failure.
 - `compaction_recovery_resume_prompt`: prompt sent after failed-compaction recovery succeeds.
 - `proactive_compaction_resume_prompt`: prompt sent after proactive compaction succeeds when no queued user input is waiting.
+- `compaction_input_queue_path`, `compaction_replay_queue_path`: optional overrides for queued Telegram input and protected replay input paths. Defaults live under `runtime_dir`.
 
 ## Language Maps
 

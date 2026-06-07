@@ -168,6 +168,15 @@ The PowerShell scripts live in `scripts/`:
 - `scripts/Stop-CodexMainline.ps1`
 - `scripts/Start-CodexMainlineWatchdog.ps1`
 - `scripts/Watch-CodexMainline.ps1`
+- `scripts/Install-CodexMainlineStartup.ps1`
+
+Optional Windows logon startup:
+
+```powershell
+.\scripts\Install-CodexMainlineStartup.ps1 -UseScheduledTask
+```
+
+`-UseScheduledTask` registers the watchdog at logon with highest privileges and removes the legacy Startup-folder entry if one exists. Omit it to install a hidden Startup-folder `.vbs` launcher instead.
 
 ## Language
 
@@ -224,6 +233,7 @@ Important fields:
 - `rhythm_*`: optional autonomous wake settings. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
 - `work_budget_*`: long-turn closeout settings.
 - `context_compaction_*`, `compaction_recovery_*`, and `compacting_*`: compaction trigger, pause-turn recovery, and user-visible behavior.
+- `compaction_input_queue_path` and `compaction_replay_queue_path`: runtime queues for inputs received during compaction and inputs protected for replay after compaction failure.
 
 See [docs/configuration.md](docs/configuration.md) for details.
 

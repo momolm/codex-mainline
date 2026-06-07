@@ -25,6 +25,7 @@ function Get-CodexMainlinePaths {
         KeepaliveLog = Join-Path $runtimeDir "keepalive.jsonl"
         LaunchStdout = Join-Path $runtimeDir "mainline.launch.stdout.log"
         LaunchStderr = Join-Path $runtimeDir "mainline.launch.stderr.log"
+        LaunchLatest = Join-Path $runtimeDir "mainline.launch.latest.json"
         ReadyPath = Join-Path $runtimeDir "mainline.ready.json"
         RestartRequestPath = Join-Path $runtimeDir "mainline.restart.request.json"
     }
@@ -525,14 +526,34 @@ function Start-CodexMainlineNodeProcess {
         $arguments += @("--startup-message", $WakeMessage)
     }
     $argumentLine = ($arguments | ForEach-Object { Quote-CodexMainlineCmdArg -Value $_ }) -join " "
-    return Start-Process `
+    $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss-fff")
+    $launchStdout = Join-Path $Paths.RuntimeDir "mainline.launch.$stamp.stdout.log"
+    $launchStderr = Join-Path $Paths.RuntimeDir "mainline.launch.$stamp.stderr.log"
+    $process = Start-Process `
         -FilePath $node.Source `
         -ArgumentList $argumentLine `
         -WorkingDirectory $Paths.WorkspaceRoot `
         -WindowStyle Hidden `
-        -RedirectStandardOutput $Paths.LaunchStdout `
-        -RedirectStandardError $Paths.LaunchStderr `
+        -RedirectStandardOutput $launchStdout `
+        -RedirectStandardError $launchStderr `
         -PassThru
+
+    $launchInfo = [pscustomobject]@{
+        pid = $process.Id
+        started_at = (Get-Date).ToUniversalTime().ToString("o")
+        stdout = $launchStdout
+        stderr = $launchStderr
+        hidden = $true
+    }
+    Write-CodexMainlineJson -Path $Paths.LaunchLatest -Data $launchInfo
+    Write-CodexMainlineJsonl -Path $Paths.KeepaliveLog -Data ([pscustomobject]@{
+        event = "mainline_process_launched"
+        pid = $process.Id
+        stdout = $launchStdout
+        stderr = $launchStderr
+        hidden = $true
+    })
+    return $process
 }
 
 function Wait-CodexMainlineStarted {

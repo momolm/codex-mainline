@@ -31,6 +31,7 @@ const DEFAULT_CONFIG = path.join(
 
 let TELEGRAM_PROXY_URL = null;
 let DEBUG_RAW = false;
+let MAIN_RUNTIME_DIR = null;
 const MAX_JSONL_BYTES = 64 * 1024 * 1024;
 const JSONL_REDIRECTS = new Map();
 const LARGE_JSONL_STRING_BYTES = 16 * 1024;
@@ -414,6 +415,11 @@ function appendJsonl(filePath, value) {
   return false;
 }
 
+function appendLifecycle(runtimeDir, event, data = {}) {
+  if (!runtimeDir) return false;
+  return appendJsonl(path.join(runtimeDir, "lifecycle.jsonl"), { event, ...data });
+}
+
 function iso(date = new Date()) {
   return date.toISOString();
 }
@@ -589,6 +595,7 @@ function defaultState() {
     compaction_last_error: null,
     compaction_circuit_opened_at: null,
     compaction_circuit_reason: null,
+    compaction_protected_turn: null,
     last_error: null,
     created_at: iso(),
     updated_at: iso(),
@@ -1088,6 +1095,13 @@ function compactionInputQueuePath(config, runtimeDir) {
   return path.join(runtimeDir, "compaction_input_queue.jsonl");
 }
 
+function compactionReplayQueuePath(config, runtimeDir) {
+  if (config.compaction_replay_queue_path) {
+    return resolveWorkspacePath(String(config.compaction_replay_queue_path));
+  }
+  return path.join(runtimeDir, "compaction_replay_queue.jsonl");
+}
+
 function countNonBlankLines(filePath) {
   if (!filePath || !existsSync(filePath)) return 0;
   try {
@@ -1115,6 +1129,82 @@ function enqueueCompactionInput({ config, runtimeDir, message, reason }) {
     reason,
   });
   return queuePath;
+}
+
+function cloneInputItems(input) {
+  return JSON.parse(JSON.stringify(inputItems(input)));
+}
+
+function protectedTurnRecord({ turnId, input, reason, metadata = null }) {
+  if (!turnId) return null;
+  return {
+    schema_version: 1,
+    turn_id: turnId,
+    protected_at: iso(),
+    reason: String(reason || "turn_input"),
+    input: cloneInputItems(input),
+    metadata,
+  };
+}
+
+function enqueueCompactionReplayInput({ config, runtimeDir, replay, reason }) {
+  if (!replay?.input) return null;
+  const queuePath = compactionReplayQueuePath(config, runtimeDir);
+  appendJsonl(queuePath, {
+    ...replay,
+    schema_version: 1,
+    kind: "codex_input",
+    queue_reason: reason,
+    queued_at: iso(),
+  });
+  appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+    direction: "compaction_replay_queued",
+    turn_id: replay.turn_id ?? null,
+    chars: JSON.stringify(replay.input).length,
+    reason,
+    metadata: replay.metadata ?? null,
+  });
+  return queuePath;
+}
+
+function drainCompactionReplayQueue(config, runtimeDir) {
+  const queuePath = compactionReplayQueuePath(config, runtimeDir);
+  if (!existsSync(queuePath)) return [];
+  const processingPath = `${queuePath}.processing-${process.pid}-${Date.now()}`;
+  try {
+    renameSync(queuePath, processingPath);
+  } catch {
+    return [];
+  }
+
+  try {
+    const lines = readFileSync(processingPath, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const inputs = [];
+    for (const line of lines) {
+      try {
+        const item = JSON.parse(line);
+        if (item?.kind === "codex_input" && item.input) inputs.push(item);
+      } catch {
+        // Malformed queue lines are ignored.
+      }
+    }
+    return inputs;
+  } finally {
+    try {
+      unlinkSync(processingPath);
+    } catch {
+      // Best effort.
+    }
+  }
+}
+
+function requeueCompactionReplayInputs({ config, runtimeDir, inputs, reason }) {
+  for (const input of inputs) {
+    enqueueCompactionReplayInput({ config, runtimeDir, replay: input, reason });
+  }
 }
 
 function drainCompactionInputQueue(config, runtimeDir) {
@@ -2132,6 +2222,10 @@ function formatMainlineStatus(state, config) {
     }),
     t(config, "status.proactiveCompact", { percent: contextCompactionTriggerUsedPercent(config) }),
     t(config, "status.compactionRecovery", { value: recoveryStatus }),
+    t(config, "status.compactionQueues", {
+      input: countNonBlankLines(compactionInputQueuePath(config, runtimeDir)),
+      replay: countNonBlankLines(compactionReplayQueuePath(config, runtimeDir)),
+    }),
     t(config, "status.nextWake", { time: formatBeijingTime(state.next_wake_at, config) ?? t(config, "common.unset") }),
     t(config, "status.lastWake", { time: formatBeijingTime(state.last_wake_at, config) ?? t(config, "common.none") }),
     t(config, "status.wakeCount", { count: Number(state.wake_count || 0) }),
@@ -2493,6 +2587,7 @@ function resetThreadBindingForNewSession({ statePath, state }) {
     compaction_last_error: null,
     compaction_circuit_opened_at: null,
     compaction_circuit_reason: null,
+    compaction_protected_turn: null,
     last_error: null,
   });
   return { previousThreadId };
@@ -2528,6 +2623,7 @@ function bindExistingThread({ statePath, state, threadId }) {
     compaction_last_error: null,
     compaction_circuit_opened_at: null,
     compaction_circuit_reason: null,
+    compaction_protected_turn: null,
     last_error: null,
   });
   return { previousThreadId };
@@ -3093,6 +3189,9 @@ class MainlineSession {
     effort = null,
     computerUse = false,
     typingIndicator = false,
+    protectInputOnCompactionFailure = false,
+    protectedInputReason = "turn_input",
+    protectedInputMetadata = null,
   } = {}) {
     const degradedStep = compactionTurnOverride(this.state);
     const effectiveModel = model ?? degradedStep?.model ?? null;
@@ -3121,16 +3220,31 @@ class MainlineSession {
     if (turnId) {
       this.currentTurnId = turnId;
       if (computerUse) this.computerUseTurnIds.add(turnId);
-      patchState(this.statePath, this.state, {
+      const patch = {
         active_turn_id: turnId,
         active_turn_started_at: iso(),
         active_turn_computer_use: Boolean(computerUse),
-      });
+      };
+      if (protectInputOnCompactionFailure) {
+        patch.compaction_protected_turn = protectedTurnRecord({
+          turnId,
+          input: prompt,
+          reason: protectedInputReason,
+          metadata: protectedInputMetadata,
+        });
+      }
+      patchState(this.statePath, this.state, patch);
     }
     return { turnId: turnId ?? this.currentTurnId, done: this.currentTurnDone };
   }
 
-  async startPlanTurn(userInput, { startup = false, typingIndicator = false } = {}) {
+  async startPlanTurn(userInput, {
+    startup = false,
+    typingIndicator = false,
+    protectInputOnCompactionFailure = false,
+    protectedInputReason = "plan_input",
+    protectedInputMetadata = null,
+  } = {}) {
     const threadId = await this.ensureThread();
     const prompt = startup ? buildStartupInput(this.config, userInput) : userInput;
     const maxWaitMs = numberFromConfig(this.config, "turn_max_wait_seconds", 1800) * 1000;
@@ -3155,11 +3269,20 @@ class MainlineSession {
     const turnId = result.turn?.id;
     if (turnId) {
       this.currentTurnId = turnId;
-      patchState(this.statePath, this.state, {
+      const patch = {
         active_turn_id: turnId,
         active_turn_started_at: iso(),
         active_turn_computer_use: false,
-      });
+      };
+      if (protectInputOnCompactionFailure) {
+        patch.compaction_protected_turn = protectedTurnRecord({
+          turnId,
+          input: prompt,
+          reason: protectedInputReason,
+          metadata: protectedInputMetadata,
+        });
+      }
+      patchState(this.statePath, this.state, patch);
     }
     return { turnId: turnId ?? this.currentTurnId, done: this.currentTurnDone };
   }
@@ -3631,19 +3754,49 @@ class MainlineSession {
     this.relayToTelegram(compactingCompletedNotice(this.config));
   }
 
+  queueProtectedTurnForReplay(turnId, reason) {
+    const protectedTurn = this.state.compaction_protected_turn;
+    const shouldReplayProtectedTurn = Boolean(
+      turnId
+      && protectedTurn?.turn_id
+      && protectedTurn.turn_id === turnId
+      && protectedTurn.input,
+    );
+    if (!shouldReplayProtectedTurn) return false;
+    const queuePath = enqueueCompactionReplayInput({
+      config: this.config,
+      runtimeDir: this.runtimeDir,
+      replay: protectedTurn,
+      reason,
+    });
+    logSystem(`protected turn input queued after compaction issue: turn=${turnId}, queue=${queuePath}, reason=${reason}`);
+    return true;
+  }
+
   noteContextCompactionFailed(reason, turnId = null) {
     const failedTurnId = turnId ?? this.currentTurnId ?? null;
     if (failedTurnId && this.state.compaction_last_failed_turn_id === failedTurnId) return;
     const summary = compactOneLine(reason, 500);
     const nextStep = nextCompactionRecoveryStep(this.state, this.config);
+    const restoreStep = compactionDefaultStep(this.config);
+    const shouldReplayProtectedTurn = this.queueProtectedTurnForReplay(
+      failedTurnId,
+      "compaction_failed_before_sampling",
+    );
     logSystem(`context compaction failed: ${summary}`);
     this.ensureRunDetailsStarted(t(this.config, "runDetails.contextCompaction"));
+    if (shouldReplayProtectedTurn) {
+      this.appendRunDetail(`protected turn input queued for replay: turn=${failedTurnId}`);
+    }
     this.appendRunDetail(`context compaction failed: ${summary}`);
-    patchState(this.statePath, this.state, {
+    const patch = {
       compacting_started_at: null,
       compacting_until: null,
       compacting_item_id: null,
       compaction_recovery_pending: true,
+      compaction_recovery_model_active: true,
+      compaction_recovery_restore_model: restoreStep.model,
+      compaction_recovery_restore_effort: restoreStep.effort,
       compaction_recovery_restore_in_progress: false,
       compaction_recovery_resume_pending: true,
       compaction_recovery_resume_reason: "recovery",
@@ -3652,7 +3805,9 @@ class MainlineSession {
       compaction_last_failed_turn_id: failedTurnId,
       compaction_last_error: summary,
       last_error: summary,
-    });
+    };
+    if (shouldReplayProtectedTurn) patch.compaction_protected_turn = null;
+    patchState(this.statePath, this.state, patch);
     this.relayToTelegram(compactingFailedNotice(this.config, nextStep));
   }
 
@@ -3662,11 +3817,23 @@ class MainlineSession {
     logSystem(reason);
     this.ensureRunDetailsStarted(t(this.config, "runDetails.contextCompaction"));
     this.appendRunDetail(reason);
-    patchState(this.statePath, this.state, {
+    const timedOutTurnId = this.state.active_turn_id ?? this.currentTurnId ?? null;
+    const shouldReplayProtectedTurn = this.queueProtectedTurnForReplay(
+      timedOutTurnId,
+      "compaction_timed_out_before_sampling",
+    );
+    if (shouldReplayProtectedTurn) {
+      this.appendRunDetail(`protected turn input queued for replay: turn=${timedOutTurnId}`);
+    }
+    const restoreStep = compactionDefaultStep(this.config);
+    const patch = {
       compacting_started_at: null,
       compacting_until: null,
       compacting_item_id: null,
       compaction_recovery_pending: true,
+      compaction_recovery_model_active: true,
+      compaction_recovery_restore_model: restoreStep.model,
+      compaction_recovery_restore_effort: restoreStep.effort,
       compaction_recovery_restore_in_progress: false,
       compaction_recovery_resume_pending: true,
       compaction_recovery_resume_reason: "recovery",
@@ -3674,7 +3841,9 @@ class MainlineSession {
       compaction_last_failed_at: iso(),
       compaction_last_error: reason,
       last_error: reason,
-    });
+    };
+    if (shouldReplayProtectedTurn) patch.compaction_protected_turn = null;
+    patchState(this.statePath, this.state, patch);
     this.relayToTelegram(compactingTimedOutNotice(this.config, nextCompactionRecoveryStep(this.state, this.config)));
   }
 
@@ -4021,6 +4190,9 @@ class MainlineSession {
         active_turn_computer_use: false,
         last_error: failed ? this.state.last_error : null,
       };
+      if (turnId && this.state.compaction_protected_turn?.turn_id === turnId) {
+        patch.compaction_protected_turn = null;
+      }
       if (turnId && this.state.work_budget_turn_id === turnId && this.state.work_budget_steered_at) {
         const now = new Date();
         Object.assign(patch, {
@@ -4095,7 +4267,17 @@ async function handleText({ session, config, state, statePath, text, startup, st
   return await session.startTurn(text, { startup, startupSourceLabel, typingIndicator: true });
 }
 
-async function handleInput({ session, state, statePath, input, startup }) {
+async function handleInput({
+  session,
+  state,
+  statePath,
+  input,
+  startup,
+  startupSourceLabel = null,
+  protectInputOnCompactionFailure = false,
+  protectedInputReason = "telegram_input",
+  protectedInputMetadata = null,
+}) {
   patchState(statePath, state, { last_input_at: iso() });
   if (state.active_turn_id) {
     try {
@@ -4106,10 +4288,24 @@ async function handleInput({ session, state, statePath, input, startup }) {
       logSystem(`active turn append failed; starting a new turn instead: ${error.message || error}`);
       patchState(statePath, state, { active_turn_id: null, active_turn_started_at: null, active_turn_computer_use: false });
       const fallback = textInput(withSystemPulseHeader(session.config, t(session.config, "main.activeAppendFallback")));
-      return await session.startTurn([...fallback, ...inputItems(input)], { startup, typingIndicator: true });
+      return await session.startTurn([...fallback, ...inputItems(input)], {
+        startup,
+        startupSourceLabel,
+        typingIndicator: true,
+        protectInputOnCompactionFailure,
+        protectedInputReason,
+        protectedInputMetadata,
+      });
     }
   }
-  return await session.startTurn(input, { startup, typingIndicator: true });
+  return await session.startTurn(input, {
+    startup,
+    startupSourceLabel,
+    typingIndicator: true,
+    protectInputOnCompactionFailure,
+    protectedInputReason,
+    protectedInputMetadata,
+  });
 }
 
 async function handleTelegramMessagesInput({ session, statePath, token, runtimeDir, messages, config }) {
@@ -4138,7 +4334,23 @@ async function handleTelegramMessagesInput({ session, statePath, token, runtimeD
     clearRest(statePath, state, "User message");
   }
   const startup = !state.thread_id;
-  const turn = await handleInput({ session, state, statePath, input: built.input, startup });
+  const turn = await handleInput({
+    session,
+    state,
+    statePath,
+    input: built.input,
+    startup,
+    protectInputOnCompactionFailure: true,
+    protectedInputReason: "telegram_input",
+    protectedInputMetadata: {
+      message_id: primaryMessage.message_id ?? null,
+      message_ids: built.messageIds,
+      media_group_id: built.mediaGroupId || null,
+      has_reply: Boolean(built.replyMessage),
+      images: built.imagePaths.length,
+      reply_images: built.replyImagePaths.length,
+    },
+  });
   return { handled: true, turn };
 }
 
@@ -4406,6 +4618,16 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
   if (isCompacting(state) || state.compacting_until) return null;
 
   const reason = String(state.compaction_recovery_resume_reason || "recovery");
+  if (countNonBlankLines(compactionReplayQueuePath(config, session.runtimeDir)) > 0) {
+    logSystem("compaction recovery resume skipped: protected replay input will continue");
+    patchState(statePath, state, {
+      compaction_recovery_resume_pending: false,
+      compaction_recovery_resume_reason: null,
+      compaction_recovery_resume_last_sent_at: null,
+      last_error: null,
+    });
+    return null;
+  }
   if (reason === "proactive" && countNonBlankLines(compactionInputQueuePath(config, session.runtimeDir)) > 0) {
     logSystem("proactive compaction resume skipped: queued TG input will continue");
     patchState(statePath, state, {
@@ -4463,6 +4685,10 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
 }
 
 async function maybeRunProactiveContextCompaction({ session, config, state }) {
+  if (countNonBlankLines(compactionReplayQueuePath(config, session.runtimeDir)) > 0) {
+    logSystem("proactive context compaction skipped: protected replay input pending");
+    return false;
+  }
   if (!shouldStartProactiveCompaction(state, config)) return false;
   const usedPercent = Math.round(contextUsageUsedPercent(state.context_usage_snapshot) ?? 0);
   const threshold = contextCompactionTriggerUsedPercent(config);
@@ -4513,6 +4739,60 @@ async function maybePreemptInputWithProactiveCompaction({
 
 async function maybeRunCompactionQueuedInputs({ session, config, state, statePath, token, runtimeDir }) {
   if (isCompactionBlocked(state) || state.compacting_until || state.active_turn_id) return null;
+  const replayInputs = drainCompactionReplayQueue(config, runtimeDir);
+  if (replayInputs.length > 0) {
+    const [replay, ...remaining] = replayInputs;
+    if (remaining.length > 0) {
+      requeueCompactionReplayInputs({
+        config,
+        runtimeDir,
+        inputs: remaining,
+        reason: "replay_queue_remaining",
+      });
+    }
+    logSystem(`replaying protected input after compaction recovery: turn=${replay.turn_id ?? "(unknown)"}, remaining=${remaining.length}`);
+    appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+      direction: "compaction_replay_started",
+      turn_id: replay.turn_id ?? null,
+      reason: replay.reason ?? null,
+      remaining: remaining.length,
+      metadata: replay.metadata ?? null,
+    });
+    try {
+      const replayReason = String(replay.reason || "");
+      if (replayReason === "telegram_plan_command") {
+        return await session.startPlanTurn(replay.input, {
+          startup: false,
+          typingIndicator: true,
+          protectInputOnCompactionFailure: true,
+          protectedInputReason: replayReason,
+          protectedInputMetadata: replay.metadata ?? null,
+        });
+      }
+      return await session.startTurn(replay.input, {
+        startup: false,
+        startupSourceLabel: t(config, "compaction.replaySourceLabel"),
+        computerUse: replayReason === "telegram_computer_command",
+        typingIndicator: true,
+        protectInputOnCompactionFailure: true,
+        protectedInputReason: replayReason || "compaction_replay",
+        protectedInputMetadata: replay.metadata ?? null,
+      });
+    } catch (error) {
+      enqueueCompactionReplayInput({
+        config,
+        runtimeDir,
+        replay,
+        reason: "replay_start_failed",
+      });
+      const message = error?.stack || String(error);
+      patchState(statePath, state, { last_error: message });
+      appendJsonl(path.join(runtimeDir, "errors.jsonl"), { error: message });
+      logSystem(`protected input replay failed to start; requeued: ${error.message || error}`);
+      return null;
+    }
+  }
+
   const messages = drainCompactionInputQueue(config, runtimeDir);
   if (messages.length === 0) return null;
 
@@ -4629,7 +4909,15 @@ async function main() {
   const config = prepareI18n(readJson(configPath));
   const runtimeDir = resolveWorkspacePath(String(config.runtime_dir));
   const statePath = resolveWorkspacePath(String(config.state_path));
+  MAIN_RUNTIME_DIR = runtimeDir;
   mkdirSync(runtimeDir, { recursive: true });
+  appendLifecycle(runtimeDir, "process_started", {
+    config_path: path.relative(WORKSPACE_ROOT, configPath),
+    once: options.once,
+    wake: options.wake,
+    startup_message_present: Boolean(options.startupMessage),
+    dry_run: options.dryRun,
+  });
   let state = loadState(statePath);
   writeJson(statePath, state);
 
@@ -4677,6 +4965,9 @@ async function main() {
     // Best effort.
   }
   const releaseLock = acquireRuntimeLock(path.join(runtimeDir, "mainline.lock.json"));
+  appendLifecycle(runtimeDir, "runtime_lock_acquired", {
+    lock_path: path.relative(WORKSPACE_ROOT, path.join(runtimeDir, "mainline.lock.json")),
+  });
   const releaseReady = () => {
     try {
       const current = existsSync(readyPath) ? readJson(readyPath) : null;
@@ -4689,12 +4980,17 @@ async function main() {
     releaseReady();
     releaseLock();
   };
-  process.once("exit", releaseRuntime);
+  process.once("exit", (code) => {
+    appendLifecycle(runtimeDir, "process_exit", { code });
+    releaseRuntime();
+  });
   process.once("SIGINT", () => {
+    appendLifecycle(runtimeDir, "signal_received", { signal: "SIGINT" });
     releaseRuntime();
     process.exit(130);
   });
   process.once("SIGTERM", () => {
+    appendLifecycle(runtimeDir, "signal_received", { signal: "SIGTERM" });
     releaseRuntime();
     process.exit(143);
   });
@@ -4707,7 +5003,11 @@ async function main() {
       config,
       runtimeDir,
     });
+    appendLifecycle(runtimeDir, "bot_commands_ready");
   } catch (error) {
+    appendLifecycle(runtimeDir, "bot_commands_failed", {
+      error: String(error?.message || error).slice(0, 500),
+    });
     logSystem(`bot command menu registration failed: ${error.message || error}`);
   }
   logSystem([
@@ -4744,7 +5044,13 @@ async function main() {
     return state;
   };
 
+  appendLifecycle(runtimeDir, "app_server_connect_begin", {
+    endpoint: config.app_server_endpoint,
+  });
   await session.ensureConnected();
+  appendLifecycle(runtimeDir, "app_server_connected", {
+    endpoint: config.app_server_endpoint,
+  });
   state = reloadState();
   const pendingMediaGroups = new Map();
   const pendingLooseInputs = new Map();
@@ -4753,8 +5059,13 @@ async function main() {
     endpoint: config.app_server_endpoint,
     ready_at: iso(),
   });
+  appendLifecycle(runtimeDir, "ready_written", {
+    ready_path: path.relative(WORKSPACE_ROOT, readyPath),
+    endpoint: config.app_server_endpoint,
+  });
   const compactionLocked = Boolean(isCompactionBlocked(state) || state.compacting_until);
   if (!compactionLocked) {
+    appendLifecycle(runtimeDir, "startup_notice_begin");
     await sendText({
       token: secrets.token,
       chatId: secrets.allowedChatId,
@@ -4763,11 +5074,16 @@ async function main() {
       runtimeDir,
       echo: true,
     });
+    appendLifecycle(runtimeDir, "startup_notice_sent");
   } else {
+    appendLifecycle(runtimeDir, "startup_notice_suppressed", {
+      reason: "compaction_locked",
+    });
     logSystem("startup TG notice suppressed: compaction recovery/lock active");
   }
 
   if (options.startupMessage && !compactionLocked) {
+    appendLifecycle(runtimeDir, "startup_message_begin");
     logSystem("startup message requested by launcher");
     const startupMessage = withSystemPulseHeader(config, options.startupMessage);
     logBlock(t(config, "main.watchdogLog"), startupMessage);
@@ -4780,11 +5096,17 @@ async function main() {
       startup: !state.thread_id,
       startupSourceLabel: t(config, "main.watchdogLabel"),
     });
+    appendLifecycle(runtimeDir, "startup_message_started", {
+      turn_id: turn?.turnId ?? null,
+    });
     if (options.once && turn?.done) {
       await turn.done;
       return;
     }
   } else if (options.startupMessage && compactionLocked) {
+    appendLifecycle(runtimeDir, "startup_message_suppressed", {
+      reason: "compaction_locked",
+    });
     logSystem("startup message suppressed: compaction recovery/lock active");
   } else if (options.wake && !state.active_turn_id && !compactionLocked) {
     logSystem("wake requested");
@@ -4794,9 +5116,13 @@ async function main() {
       return;
     }
   } else if (options.wake && compactionLocked) {
+    appendLifecycle(runtimeDir, "wake_suppressed", {
+      reason: "compaction_locked",
+    });
     logSystem("wake suppressed: compaction recovery/lock active");
   }
 
+  appendLifecycle(runtimeDir, "poll_loop_entered");
   while (true) {
     try {
       state = reloadState();
@@ -5485,6 +5811,12 @@ async function main() {
             startup,
             computerUse: true,
             typingIndicator: true,
+            protectInputOnCompactionFailure: true,
+            protectedInputReason: "telegram_computer_command",
+            protectedInputMetadata: {
+              command: "/computer",
+              message_id: message.message_id ?? null,
+            },
           });
           if (options.once && turn?.done) {
             await turn.done;
@@ -5545,13 +5877,22 @@ async function main() {
           }
           const startup = !state.thread_id;
           const planBody = `${buildTelegramPulseHeader(config, message)}\n${planCommand.body}`;
-          const turn = await session.startPlanTurn(planBody, { startup, typingIndicator: true });
+          const turn = await session.startPlanTurn(planBody, {
+            startup,
+            typingIndicator: true,
+            protectInputOnCompactionFailure: true,
+            protectedInputReason: "telegram_plan_command",
+            protectedInputMetadata: {
+              command: "/plan",
+              message_id: message.message_id ?? null,
+            },
+          });
           const notice = turn?.done?.then(async (ok) => {
             if (ok === false) return false;
             return await sendText({
               token: secrets.token,
               chatId: secrets.allowedChatId,
-              text: planFinishedNotice(),
+              text: planFinishedNotice(config),
               maxChars,
               runtimeDir,
               echo: true,
@@ -5604,20 +5945,6 @@ async function main() {
           continue;
         }
 
-        state = reloadState();
-        if (await maybePreemptInputWithProactiveCompaction({
-          session,
-          config,
-          state,
-          runtimeDir,
-          message,
-          token: secrets.token,
-          chatId: secrets.allowedChatId,
-          maxChars,
-        })) {
-          continue;
-        }
-
         if (telegramMediaGroupId(message)) {
           queueMediaGroupMessage({
             pendingMediaGroups,
@@ -5636,6 +5963,20 @@ async function main() {
             config,
             runtimeDir,
           });
+          continue;
+        }
+
+        state = reloadState();
+        if (await maybePreemptInputWithProactiveCompaction({
+          session,
+          config,
+          state,
+          runtimeDir,
+          message,
+          token: secrets.token,
+          chatId: secrets.allowedChatId,
+          maxChars,
+        })) {
           continue;
         }
 
@@ -5728,6 +6069,9 @@ async function main() {
 }
 
 main().catch((error) => {
+  appendLifecycle(MAIN_RUNTIME_DIR, "fatal_error", {
+    error: String(error?.stack || error).slice(0, 2000),
+  });
   closeLiveStream();
   console.error(error?.stack || String(error));
   process.exit(1);
