@@ -213,7 +213,7 @@ Important fields:
 - `locale`, `fallback_locale`, `locales_dir`: bridge output language and locale catalog directory.
 - `codex_command`: command used to start Codex CLI.
 - `app_server_endpoint`: websocket endpoint for `codex app-server`.
-- `model`, `service_tier`, `effort`: default turn settings.
+- `model`, `service_tier`, `effort`: default turn settings. `service_tier` defaults to `standard`; use `fast` only when the connected account supports it.
 - `sandbox_mode`, `sandbox_network_access`, `sandbox_extra_writable_roots`: Codex sandbox policy for turns.
 - `bot_token_env`, `allowed_chat_id_env`, `telegram_api_proxy_url_env`: environment variable names.
 - `local_config_path`: ignored JSON file for local Telegram credentials.
@@ -221,15 +221,19 @@ Important fields:
 - `runtime_dir`: local-only logs, attachments, generated images, sidecars, locks, and ready files.
 - `bot_commands`: Telegram slash menu registered at startup.
 - `startup_context_paths`: files included in the first startup prompt.
+- `startup_autonomy_context_paths`: extra files listed only for autonomous wake startup prompts.
 - `rhythm_*`: optional autonomous wake settings. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
 - `work_budget_*`: long-turn closeout settings.
 - `context_compaction_*`, `compaction_recovery_*`, and `compacting_*`: compaction trigger, pause-turn recovery, and user-visible behavior.
+- `compaction_input_queue_path` and `compaction_replay_queue_path`: runtime queues for inputs received during compaction and inputs protected for replay after compaction failure.
 
 See [docs/configuration.md](docs/configuration.md) for details.
 
 ## Startup Context
 
 `startup_context_paths` controls which files the first Codex turn is told to read. The committed default points at `docs/operator-context.example.md`.
+
+`startup_autonomy_context_paths` is used by autonomous wake prompts. Keep it empty for ordinary one-shot deployments, or point it at compact rhythm/autonomy notes for long-lived mainline sessions.
 
 For a real deployment, replace this with your own public or local instruction files. Keep private files local and ignored if they contain secrets or project-specific data that should not be published.
 

@@ -8,7 +8,7 @@
   "app_server_endpoint": "ws://127.0.0.1:48751",
   "app_server_fallback_port_scan": 10,
   "model": "gpt-5.5",
-  "service_tier": null,
+  "service_tier": "standard",
   "effort": "high",
   "sandbox_mode": "workspace-write",
   "sandbox_network_access": true,
@@ -96,5 +96,6 @@
   "max_message_chars": 3500,
   "startup_context_paths": [
     "docs/operator-context.example.md"
-  ]
+  ],
+  "startup_autonomy_context_paths": []
 }

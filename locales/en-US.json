@@ -33,12 +33,15 @@
   },
   "startup": {
     "sourceLabel": "User message",
-    "contextMissing": "(no startup context paths configured)",
+    "contextMissing": "no startup context paths configured",
     "header": "[Startup Guide]",
-    "intro": "This is a new Telegram mainline session. First complete startup: read the configured context files and recover the current project notes and operating boundaries.",
-    "replyRule": "After reading them, do not output a long startup report. Reply naturally to the user and keep the same context for later conversation.",
-    "deliveryRule": "The current entry point is Telegram. When you truly need to deliver a local file back to Telegram, append <tg_send_file path=\"local file path\" /> at the end of your reply. Do not use that marker for ordinary chat or analysis.",
-    "wakeRule": "After startup, briefly tell the user you are ready. Do not create a complex process, start the rhythm loop, or enter an extra state machine.",
+    "intro": "This is a new Telegram mainline session. I need to complete startup first: read the configured context files, recover the current project notes, operating boundaries, and handoff context.",
+    "extraContextRule": "If this turn involves autonomous action, rhythm, mainline maintenance, remote maintenance, tools, or project-specific notes, I will continue reading the necessary configured or project context.",
+    "wakeIntro": "This is a Telegram mainline autonomous wake. I need to complete startup first: read the configured context files and recover the current project notes, operating boundaries, and handoff context.",
+    "autonomyIntro": "Then read autonomous-action context:",
+    "replyRule": "After reading them, I will not output a long startup report. I will reply naturally to the user and keep the same context for later conversation.",
+    "deliveryRule": "The current entry point is Telegram. When I truly need to deliver a local file back to Telegram, I append <tg_send_file path=\"local file path\" /> at the end of my reply. I do not use that marker for ordinary chat or analysis.",
+    "wakeRule": "After startup, I will follow the autonomous-action rules and advance one small, finishable work package. I will not create a complex process or enter an extra state machine.",
     "wakeAction": "Autonomous action."
   },
   "telegramInput": {
@@ -119,6 +122,9 @@
     "circuitOpen": "circuit open: {reason}",
     "none": "none"
   },
+  "serverOverloaded": {
+    "continuePrompt": "[Codex Mainline]: The previous turn failed because the OpenAI service was busy (serverOverloaded). Continue the task from the current context. Keep the reply focused; if the task is already complete, close it out briefly."
+  },
   "time": {
     "hours5": "5h",
     "days7": "7d",
@@ -136,6 +142,8 @@
     "snapshot": "snapshot: {time}",
     "limitNone": "{label}: no snapshot",
     "limit": "{label}: {bar} {remaining}% remaining (reset: {reset})",
+    "limitSuspicious": "{label}: no trusted snapshot (ignored suspicious 0% usage)",
+    "limitSnapshot": "limit snapshot: {time}",
     "primaryLimitNone": "5h limit: no snapshot",
     "secondaryLimitNone": "7d limit: no snapshot",
     "limitLabel": "{window} limit",

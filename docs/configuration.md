@@ -49,7 +49,7 @@ Local file shape:
 - `app_server_endpoint`: websocket URL for the app-server. The default is `ws://127.0.0.1:48751`.
 - `app_server_fallback_port_scan`: how many higher ports to scan when the configured endpoint is unavailable.
 - `model`: default Codex model.
-- `service_tier`: optional service tier.
+- `service_tier`: service tier for turns. The default config uses `standard`; set `fast` only when the connected account supports it.
 - `effort`: default reasoning effort.
 - `sandbox_mode`: `workspace-write`, `danger-full-access`, or `read-only`.
 - `sandbox_network_access`: whether turns may use network in sandboxed modes.
@@ -58,6 +58,7 @@ Local file shape:
 - `runtime_dir`: local-only runtime evidence directory.
 - `bot_commands`: slash commands registered with Telegram.
 - `startup_context_paths`: files listed in the startup prompt.
+- `startup_autonomy_context_paths`: extra files listed only in autonomous wake startup prompts.
 - `rhythm_enabled`, `rhythm_interval_seconds`, `rhythm_message_path`: optional wake loop. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
 - `work_budget_seconds`, `work_budget_prompt_path`, `rest_seconds`: long-turn closeout and rest settings.
 - `context_compaction_trigger_used_percent`: proactive compaction threshold.
@@ -66,6 +67,7 @@ Local file shape:
 - `compaction_recovery_resume_prompt`: prompt sent after failed-compaction recovery succeeds.
 - `proactive_compaction_resume_prompt`: prompt sent after proactive compaction succeeds when no queued user input is waiting.
 - `compaction_input_queue_path`, `compaction_replay_queue_path`: optional overrides for queued Telegram input and protected replay input paths. Defaults live under `runtime_dir`.
+- `server_overloaded_continue_prompt`: optional override for the continuation prompt sent after an OpenAI `serverOverloaded` turn failure.
 
 ## Language Maps
 

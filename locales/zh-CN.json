@@ -33,12 +33,15 @@
   },
   "startup": {
     "sourceLabel": "用户消息",
-    "contextMissing": "(未配置启动上下文路径)",
+    "contextMissing": "未配置启动上下文路径",
     "header": "【启动引导】",
-    "intro": "这是新的 Telegram mainline 会话。请先完成启动流程：读取以下配置的上下文文件，恢复当前项目说明和操作边界。",
-    "replyRule": "读完后，不要输出冗长启动报告，直接自然回复用户。后续保持同一个上下文自然对话。",
-    "deliveryRule": "当前入口是 Telegram；当你确实需要把本地文件交付回 Telegram 时，在回复末尾输出 <tg_send_file path=\"本地文件路径\" />。普通聊天和分析不要使用该标记。",
-    "wakeRule": "启动完成后简短告诉用户你已准备好。不要制定复杂流程，不要启动节律器，不要进入额外状态机。",
+    "intro": "这是新的 Telegram mainline 会话。我要先完成冷启动：读取以下配置的上下文文件，恢复当前项目说明、操作边界和交接上下文。",
+    "extraContextRule": "如果本轮消息涉及自主行动、节律、主线维护、远端维护、工具或项目专题资料，我会继续读取必要的配置上下文或项目上下文。",
+    "wakeIntro": "这是 Telegram mainline 自主启动。我要先完成冷启动：读取以下配置的上下文文件，恢复当前项目说明、操作边界和交接上下文。",
+    "autonomyIntro": "然后读取自主行动材料：",
+    "replyRule": "读完后，我不输出冗长启动报告，直接自然回复用户。后续保持同一个上下文自然对话。",
+    "deliveryRule": "当前入口是 Telegram；当我确实需要把本地文件交付回 Telegram 时，在回复末尾输出 <tg_send_file path=\"本地文件路径\" />。普通聊天和分析不使用该标记。",
+    "wakeRule": "启动完成后，我按自主行动规则推进一个可收口的小工作包。不制定复杂流程，不进入额外状态机。",
     "wakeAction": "自主行动。"
   },
   "telegramInput": {
@@ -119,6 +122,9 @@
     "circuitOpen": "已熔断: {reason}",
     "none": "无"
   },
+  "serverOverloaded": {
+    "continuePrompt": "【Codex Mainline】: 上一轮因为 OpenAI 服务繁忙(serverOverloaded)失败。请基于当前上下文继续刚才正在处理的任务；保持回复聚焦。任务已经完成时，简短收束并说明结果。"
+  },
   "time": {
     "hours5": "5小时",
     "days7": "7天",
@@ -136,6 +142,8 @@
     "snapshot": "快照: {time}",
     "limitNone": "{label}: 暂无快照",
     "limit": "{label}: {bar} 剩余 {remaining}%（重置时间: {reset}）",
+    "limitSuspicious": "{label}: 暂无可信快照（已忽略异常 0% 占用）",
+    "limitSnapshot": "限额快照: {time}",
     "primaryLimitNone": "5小时限额: 暂无快照",
     "secondaryLimitNone": "7天限额: 暂无快照",
     "limitLabel": "{window}限额",

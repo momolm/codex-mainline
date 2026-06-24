@@ -213,7 +213,7 @@ PowerShell 脚本在 `scripts/` 下：
 - `locale`、`fallback_locale`、`locales_dir`：桥接输出语言和 locale catalog 目录。
 - `codex_command`：用于启动 Codex CLI 的命令。
 - `app_server_endpoint`：`codex app-server` 的 websocket endpoint。
-- `model`、`service_tier`、`effort`：默认 turn 设置。
+- `model`、`service_tier`、`effort`：默认 turn 设置。`service_tier` 默认是 `standard`；账号支持提速时可显式切到 `fast`。
 - `sandbox_mode`、`sandbox_network_access`、`sandbox_extra_writable_roots`：turn 的 Codex sandbox 策略。
 - `bot_token_env`、`allowed_chat_id_env`、`telegram_api_proxy_url_env`：环境变量名。
 - `local_config_path`：保存本地 Telegram 凭据的 ignored JSON 文件。
@@ -221,15 +221,19 @@ PowerShell 脚本在 `scripts/` 下：
 - `runtime_dir`：仅本地使用的日志、附件、生成图片、sidecar、lock 和 ready 文件目录。
 - `bot_commands`：启动时注册到 Telegram 的 slash menu。
 - `startup_context_paths`：首个启动 prompt 中列出的文件。
+- `startup_autonomy_context_paths`：只在自主唤醒启动 prompt 中额外列出的文件。
 - `rhythm_*`：可选自主唤醒设置。`rhythm_enabled` 默认是 `false`；需要时用 `/rhythm on` 或配置显式开启。
 - `work_budget_*`：长 turn 收尾设置。
 - `context_compaction_*`、`compaction_recovery_*` 和 `compacting_*`：压缩触发、暂停 turn 恢复和用户可见行为。
+- `compaction_input_queue_path` 和 `compaction_replay_queue_path`：压缩期间收到的输入队列，以及压缩失败后受保护输入的重放队列。
 
 详见 [docs/configuration.md](docs/configuration.md)。
 
 ## 启动上下文
 
 `startup_context_paths` 控制首个 Codex turn 被要求读取哪些文件。提交的默认值指向 `docs/operator-context.example.md`。
+
+`startup_autonomy_context_paths` 供自主唤醒 prompt 使用。普通一次性部署保持空数组；长期 mainline 会话可以指向精简的节律或自治说明。
 
 真实部署时，请替换成你自己的公开或本地 instruction 文件。如果文件包含密钥或不应公开的项目特定资料，请保持其本地化并加入 ignored 范围。
 

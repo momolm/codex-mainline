@@ -596,6 +596,10 @@ function defaultState() {
     compaction_circuit_opened_at: null,
     compaction_circuit_reason: null,
     compaction_protected_turn: null,
+    server_overloaded_last_error_at: null,
+    server_overloaded_last_turn_id: null,
+    server_overloaded_resume_requested_for_turn_id: null,
+    server_overloaded_recovery_turn_id: null,
     last_error: null,
     created_at: iso(),
     updated_at: iso(),
@@ -1131,6 +1135,12 @@ function enqueueCompactionInput({ config, runtimeDir, message, reason }) {
   return queuePath;
 }
 
+function requeueCompactionInputs({ config, runtimeDir, messages, reason }) {
+  for (const message of messages) {
+    enqueueCompactionInput({ config, runtimeDir, message, reason });
+  }
+}
+
 function cloneInputItems(input) {
   return JSON.parse(JSON.stringify(inputItems(input)));
 }
@@ -1659,16 +1669,42 @@ function inputItems(input) {
   return Array.isArray(input) ? input : textInput(String(input ?? ""));
 }
 
-function formatStartupContextPathList(config) {
-  const paths = Array.isArray(config.startup_context_paths)
-    ? config.startup_context_paths.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim())
+function prependTextToInput(prefix, input) {
+  const value = String(prefix ?? "").trimEnd();
+  const items = inputItems(input);
+  if (!value) return items;
+  if (items[0]?.type === "text") {
+    return [
+      { ...items[0], text: `${value}\n${String(items[0].text ?? "")}` },
+      ...items.slice(1),
+    ];
+  }
+  return [...textInput(value), ...items];
+}
+
+function formatStartupPathList(config, paths) {
+  const items = Array.isArray(paths)
+    ? paths.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim())
     : [];
-  return paths.length > 0 ? `- ${paths.join("\n- ")}` : t(config, "startup.contextMissing");
+  return items.length > 0 ? `- ${items.join("\n- ")}` : `- ${t(config, "startup.contextMissing")}`;
+}
+
+function formatStartupContextPathList(config) {
+  return formatStartupPathList(config, config.startup_context_paths);
+}
+
+function formatStartupAutonomyPathList(config) {
+  return formatStartupPathList(config, config.startup_autonomy_context_paths);
+}
+
+function startupAutonomyContextConfigured(config) {
+  return Array.isArray(config.startup_autonomy_context_paths)
+    && config.startup_autonomy_context_paths.some((item) => typeof item === "string" && item.trim());
 }
 
 function buildStartupInput(config, userInput, sourceLabel = null) {
   if (!Array.isArray(userInput)) return textInput(buildStartupPrompt(config, userInput, sourceLabel));
-  return [...textInput(buildStartupPrompt(config, "", sourceLabel)), ...userInput];
+  return prependTextToInput(buildStartupPrompt(config, "", sourceLabel), userInput);
 }
 
 function localImageInput(imagePath) {
@@ -1683,6 +1719,8 @@ function buildStartupPrompt(config, userText, sourceLabel = null) {
     t(config, "startup.intro"),
     paths,
     "",
+    t(config, "startup.extraContextRule"),
+    "",
     t(config, "startup.replyRule"),
     t(config, "startup.deliveryRule"),
     "",
@@ -1692,17 +1730,26 @@ function buildStartupPrompt(config, userText, sourceLabel = null) {
 }
 
 function buildWakePrompt(config) {
-  const paths = formatStartupContextPathList(config);
-  return [
+  const lines = [
     t(config, "startup.header"),
-    t(config, "startup.intro"),
-    paths,
+    t(config, "startup.wakeIntro"),
+    formatStartupContextPathList(config),
     "",
+  ];
+  if (startupAutonomyContextConfigured(config)) {
+    lines.push(
+      t(config, "startup.autonomyIntro"),
+      formatStartupAutonomyPathList(config),
+      "",
+    );
+  }
+  lines.push(
     t(config, "startup.wakeRule"),
     t(config, "startup.deliveryRule"),
     "",
     t(config, "startup.wakeAction"),
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function rhythmEnabled(config) {
@@ -1887,6 +1934,16 @@ function isCompactionErrorText(value) {
   return /compact|compaction|contextCompaction|responses\/compact|\u4e0a\u4e0b\u6587\u538b\u7f29/i.test(String(value || ""));
 }
 
+function isServerOverloadedErrorText(value) {
+  const text = String(value || "");
+  return /"codexErrorInfo"\s*:\s*"serverOverloaded"/i.test(text)
+    || /\bcodexErrorInfo\b[\s\S]*\bserverOverloaded\b/i.test(text);
+}
+
+function serverOverloadedContinuePrompt(config) {
+  return localizedConfigText(config, "server_overloaded_continue_prompt", "serverOverloaded.continuePrompt");
+}
+
 function isFailedRuntimeItem(item) {
   const status = String(item?.status ?? "").toLowerCase();
   if (status === "failed" || status === "error") return true;
@@ -1928,6 +1985,29 @@ function isCompactionBlocked(state) {
     || state.compaction_recovery_model_active
     || isCompacting(state)
   );
+}
+
+function compactionResumeReason(state) {
+  if (!state?.compaction_recovery_resume_pending) return null;
+  const reason = String(state.compaction_recovery_resume_reason || "").trim();
+  return reason || "recovery";
+}
+
+function isCompactionRecoveryResumeReady(state) {
+  return Boolean(
+    compactionResumeReason(state) === "recovery"
+    && !state.compaction_recovery_pending
+    && !state.compaction_recovery_model_active
+    && !state.compaction_recovery_restore_in_progress
+    && !state.compaction_circuit_opened_at
+    && !isCompacting(state)
+    && !state.compacting_until
+  );
+}
+
+function shouldStoreInputForCompactionResume(state) {
+  const reason = compactionResumeReason(state);
+  return reason === "proactive" || reason === "recovery";
 }
 
 function hasCompactingTimedOut(state) {
@@ -2042,15 +2122,23 @@ function contextUsageSnapshotFromParams(params, observedAt = iso()) {
   };
 }
 
-function rateLimitSnapshotFromParams(params, observedAt = iso()) {
-  const rateLimits = params?.rateLimits;
+function rateLimitSnapshotFromPayload(rateLimits, observedAt = iso()) {
   if (!rateLimits || typeof rateLimits !== "object") return null;
   const normalize = (limit) => {
     if (!limit || typeof limit !== "object") return null;
-    const usedPercent = clampPercent(limit.usedPercent);
+    const usedPercent = clampPercent(
+      limit.usedPercent
+        ?? limit.used_percent
+        ?? limit.usagePercent
+        ?? limit.usage_percent,
+    );
+    const remainingFromPayload = clampPercent(limit.remainingPercent ?? limit.remaining_percent);
+    const remainingPercent = usedPercent === null
+      ? remainingFromPayload
+      : Math.max(0, 100 - usedPercent);
     return {
       used_percent: usedPercent,
-      remaining_percent: usedPercent === null ? null : Math.max(0, 100 - usedPercent),
+      remaining_percent: remainingPercent,
       window_duration_mins: finiteInteger(limit.windowDurationMins),
       resets_at: finiteInteger(limit.resetsAt),
     };
@@ -2058,11 +2146,35 @@ function rateLimitSnapshotFromParams(params, observedAt = iso()) {
   return {
     observed_at: observedAt,
     limit_id: rateLimits.limitId ?? null,
+    limit_name: rateLimits.limitName ?? null,
     plan_type: rateLimits.planType ?? null,
     rate_limit_reached_type: rateLimits.rateLimitReachedType ?? null,
     primary: normalize(rateLimits.primary),
     secondary: normalize(rateLimits.secondary),
   };
+}
+
+function rateLimitSnapshotFromParams(params, observedAt = iso()) {
+  return rateLimitSnapshotFromPayload(params?.rateLimits, observedAt);
+}
+
+function isSuspiciousZeroRateLimitSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  const primaryUsed = finiteNumber(snapshot.primary?.used_percent);
+  const secondaryUsed = finiteNumber(snapshot.secondary?.used_percent);
+  const primaryWindow = finiteInteger(snapshot.primary?.window_duration_mins);
+  const secondaryWindow = finiteInteger(snapshot.secondary?.window_duration_mins);
+  const modelSpecific = Boolean(snapshot.limit_name) || (
+    snapshot.limit_id
+    && snapshot.limit_id !== "codex"
+  );
+  return Boolean(
+    modelSpecific
+    && primaryWindow === 300
+    && secondaryWindow === 10080
+    && primaryUsed === 0
+    && secondaryUsed === 0,
+  );
 }
 
 function readFileTail(filePath, maxBytes = 512 * 1024) {
@@ -2109,7 +2221,10 @@ function readLatestStatusSnapshotsFromEvents(runtimeDir) {
     if (!contextUsageSnapshot && method === "thread/tokenUsage/updated") {
       contextUsageSnapshot = contextUsageSnapshotFromParams(entry.message?.params, entry.ts);
     } else if (!rateLimitsSnapshot && method === "account/rateLimits/updated") {
-      rateLimitsSnapshot = rateLimitSnapshotFromParams(entry.message?.params, entry.ts);
+      const candidate = rateLimitSnapshotFromParams(entry.message?.params, entry.ts);
+      if (candidate && !isSuspiciousZeroRateLimitSnapshot(candidate)) {
+        rateLimitsSnapshot = candidate;
+      }
     }
   }
 
@@ -2132,8 +2247,19 @@ function hydrateStatusSnapshots({ runtimeDir, statePath, state }) {
   if (contextSnapshotMatchesThread && isNewerSnapshot(snapshots.contextUsageSnapshot, state.context_usage_snapshot)) {
     patch.context_usage_snapshot = snapshots.contextUsageSnapshot;
   }
-  if (isNewerSnapshot(snapshots.rateLimitsSnapshot, state.rate_limits_snapshot)) {
+  const currentRateLimitSuspicious = isSuspiciousZeroRateLimitSnapshot(state.rate_limits_snapshot);
+  const candidateRateLimitSuspicious = isSuspiciousZeroRateLimitSnapshot(snapshots.rateLimitsSnapshot);
+  if (
+    isNewerSnapshot(snapshots.rateLimitsSnapshot, state.rate_limits_snapshot)
+    || (
+      currentRateLimitSuspicious
+      && snapshots.rateLimitsSnapshot
+      && !candidateRateLimitSuspicious
+    )
+  ) {
     patch.rate_limits_snapshot = snapshots.rateLimitsSnapshot;
+  } else if (currentRateLimitSuspicious && !snapshots.rateLimitsSnapshot) {
+    patch.rate_limits_snapshot = null;
   }
   return Object.keys(patch).length > 0 ? patchState(statePath, state, patch) : state;
 }
@@ -2176,10 +2302,19 @@ function formatRateLimitLines(config, snapshot) {
   }
   const primaryLabel = t(config, "status.limitLabel", { window: formatWindowDuration(config, snapshot.primary?.window_duration_mins) });
   const secondaryLabel = t(config, "status.limitLabel", { window: formatWindowDuration(config, snapshot.secondary?.window_duration_mins) });
+  const stale = formatBeijingTimeShort(snapshot.observed_at);
+  if (isSuspiciousZeroRateLimitSnapshot(snapshot)) {
+    return [
+      t(config, "status.limitSuspicious", { label: primaryLabel }),
+      t(config, "status.limitSuspicious", { label: secondaryLabel }),
+      stale ? t(config, "status.limitSnapshot", { time: stale }) : null,
+    ].filter(Boolean);
+  }
   return [
     formatRateLimitLine(config, primaryLabel, snapshot.primary),
     formatRateLimitLine(config, secondaryLabel, snapshot.secondary),
-  ];
+    stale ? t(config, "status.limitSnapshot", { time: stale }) : null,
+  ].filter(Boolean);
 }
 
 function formatMainlineStatus(state, config) {
@@ -2588,6 +2723,10 @@ function resetThreadBindingForNewSession({ statePath, state }) {
     compaction_circuit_opened_at: null,
     compaction_circuit_reason: null,
     compaction_protected_turn: null,
+    server_overloaded_last_error_at: null,
+    server_overloaded_last_turn_id: null,
+    server_overloaded_resume_requested_for_turn_id: null,
+    server_overloaded_recovery_turn_id: null,
     last_error: null,
   });
   return { previousThreadId };
@@ -2624,6 +2763,10 @@ function bindExistingThread({ statePath, state, threadId }) {
     compaction_circuit_opened_at: null,
     compaction_circuit_reason: null,
     compaction_protected_turn: null,
+    server_overloaded_last_error_at: null,
+    server_overloaded_last_turn_id: null,
+    server_overloaded_resume_requested_for_turn_id: null,
+    server_overloaded_recovery_turn_id: null,
     last_error: null,
   });
   return { previousThreadId };
@@ -2935,7 +3078,7 @@ class MainlineSession {
       onNotification: (message) => this.handleNotification(message),
     });
     await this.rpc.request("initialize", {
-      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.3" },
+      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.4" },
       capabilities: { experimentalApi: true, optOutNotificationMethods: [] },
     });
     logSystem("app-server websocket connected");
@@ -3304,6 +3447,54 @@ class MainlineSession {
       });
     }
     return { turnId: turnId ?? this.currentTurnId, done: this.currentTurnDone };
+  }
+
+  shouldContinueAfterServerOverloaded(failedTurnId) {
+    if (!failedTurnId) return false;
+    if (!isServerOverloadedErrorText(this.state.last_error)) return false;
+    if (this.state.server_overloaded_recovery_turn_id === failedTurnId) return false;
+    if (this.state.server_overloaded_resume_requested_for_turn_id === failedTurnId) return false;
+    return true;
+  }
+
+  async continueAfterServerOverloaded(failedTurnId) {
+    if (!failedTurnId || !this.state.thread_id) return null;
+    if (!this.shouldContinueAfterServerOverloaded(failedTurnId)) return null;
+
+    patchState(this.statePath, this.state, {
+      server_overloaded_last_error_at: iso(),
+      server_overloaded_last_turn_id: failedTurnId,
+      server_overloaded_resume_requested_for_turn_id: failedTurnId,
+      last_error: null,
+    });
+
+    this.ensureRunDetailsStarted(t(this.config, "runDetails.systemEvent"));
+    this.appendRunDetail(`serverOverloaded detected; continuation requested: failed_turn=${failedTurnId}`);
+    this.flushRunDetails(false);
+
+    try {
+      const prompt = withSystemPulseHeader(this.config, serverOverloadedContinuePrompt(this.config));
+      const turn = await this.startTurn(prompt, {
+        startup: false,
+        startupSourceLabel: "serverOverloaded recovery",
+        typingIndicator: true,
+      });
+      if (turn?.turnId) {
+        patchState(this.statePath, this.state, {
+          server_overloaded_recovery_turn_id: turn.turnId,
+        });
+      }
+      logSystem(`serverOverloaded continuation started: failed_turn=${failedTurnId}, recovery_turn=${turn?.turnId ?? "(unknown)"}`);
+      return turn;
+    } catch (error) {
+      const message = error?.stack || String(error);
+      patchState(this.statePath, this.state, { last_error: message });
+      this.ensureRunDetailsStarted(t(this.config, "runDetails.systemError"));
+      this.appendRunDetail(`serverOverloaded continuation start failed: ${compactOneLine(error?.message || error, 240)}`);
+      this.flushRunDetails(true);
+      logSystem(`serverOverloaded continuation start failed: ${error?.message || error}`);
+      return null;
+    }
   }
 
   prepareTurnWait(maxWaitMs) {
@@ -3975,7 +4166,7 @@ class MainlineSession {
 
     if (message.method === "account/rateLimits/updated") {
       const snapshot = rateLimitSnapshotFromParams(message.params, iso());
-      if (snapshot) {
+      if (snapshot && !isSuspiciousZeroRateLimitSnapshot(snapshot)) {
         patchState(this.statePath, this.state, { rate_limits_snapshot: snapshot });
       }
       return;
@@ -4180,6 +4371,13 @@ class MainlineSession {
         || this.state.compacting_until
         || isCompactionErrorText(this.state.last_error)
       );
+      const serverOverloadedRecoveryTurn = Boolean(
+        turnId && this.state.server_overloaded_recovery_turn_id === turnId,
+      );
+      const shouldContinueServerOverloaded = failed
+        && !failedDuringCompaction
+        && !serverOverloadedRecoveryTurn
+        && this.shouldContinueAfterServerOverloaded(turnId);
       if (failedDuringCompaction) {
         this.noteContextCompactionFailed(`turn completed with status=${status}`, turnId);
       }
@@ -4192,6 +4390,9 @@ class MainlineSession {
       };
       if (turnId && this.state.compaction_protected_turn?.turn_id === turnId) {
         patch.compaction_protected_turn = null;
+      }
+      if (serverOverloadedRecoveryTurn) {
+        patch.server_overloaded_recovery_turn_id = null;
       }
       if (turnId && this.state.work_budget_turn_id === turnId && this.state.work_budget_steered_at) {
         const now = new Date();
@@ -4222,6 +4423,9 @@ class MainlineSession {
       void Promise.allSettled(this.pendingTelegramRelays).then((results) => {
         done?.(results.every((result) => result.status === "fulfilled" && result.value !== false));
       });
+      if (shouldContinueServerOverloaded) {
+        void this.continueAfterServerOverloaded(turnId);
+      }
       return;
     }
 
@@ -4308,14 +4512,20 @@ async function handleInput({
   });
 }
 
-async function handleTelegramMessagesInput({ session, statePath, token, runtimeDir, messages, config }) {
+async function buildAndLogTelegramMessagesInput({
+  token,
+  runtimeDir,
+  messages,
+  config,
+  direction = null,
+}) {
   const built = await buildTelegramInputFromMessages({ token, messages, runtimeDir, config });
-  if (!built.handled) return { handled: false, turn: null };
+  if (!built.handled) return { handled: false, built: null, primaryMessage: null };
 
   const primaryMessage = built.primaryMessage ?? {};
   logBlock(t(config, "log.userToCodex"), built.logText);
   appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
-    direction: built.mediaGroupId ? "recv_media_group" : "recv",
+    direction: direction || (built.mediaGroupId ? "recv_media_group" : "recv"),
     message_id: primaryMessage.message_id ?? null,
     message_ids: built.messageIds,
     media_group_id: built.mediaGroupId || null,
@@ -4327,6 +4537,19 @@ async function handleTelegramMessagesInput({ session, statePath, token, runtimeD
     reply_chars: telegramMessageText(built.replyMessage).length,
     reply_images: built.replyImagePaths.length,
   });
+  return { handled: true, built, primaryMessage };
+}
+
+async function handleTelegramMessagesInput({ session, statePath, token, runtimeDir, messages, config }) {
+  const prepared = await buildAndLogTelegramMessagesInput({
+    token,
+    runtimeDir,
+    messages,
+    config,
+  });
+  if (!prepared.handled) return { handled: false, turn: null };
+
+  const { built, primaryMessage } = prepared;
 
   const state = loadState(statePath);
   session.state = state;
@@ -4430,6 +4653,19 @@ async function flushDueMediaGroups({ pendingMediaGroups, session, statePath, tok
     pendingMediaGroups.delete(group.key);
     const messages = normalizeTelegramMessages([...group.messages.values()]);
     logSystem(`TG media group flushed: group=${group.mediaGroupId}, count=${messages.length}`);
+    const state = loadState(statePath);
+    session.state = state;
+    if (isCompactionBlocked(state) || state.compacting_until || shouldStoreInputForCompactionResume(state)) {
+      requeueCompactionInputs({
+        config: session.config,
+        runtimeDir,
+        messages,
+        reason: shouldStoreInputForCompactionResume(state)
+          ? `${compactionResumeReason(state) || "compaction"}_resume_pending_media_group`
+          : "compaction_locked_media_group",
+      });
+      continue;
+    }
     const result = await handleTelegramMessagesInput({
       session,
       statePath,
@@ -4453,6 +4689,19 @@ async function flushDueLooseInputs({ pendingLooseInputs, session, statePath, tok
     pendingLooseInputs.delete(group.key);
     const messages = normalizeTelegramMessages([...group.messages.values()]);
     logSystem(`TG loose media group flushed: count=${messages.length}, image_messages=${group.imageMessageCount}`);
+    const state = loadState(statePath);
+    session.state = state;
+    if (isCompactionBlocked(state) || state.compacting_until || shouldStoreInputForCompactionResume(state)) {
+      requeueCompactionInputs({
+        config: session.config,
+        runtimeDir,
+        messages,
+        reason: shouldStoreInputForCompactionResume(state)
+          ? `${compactionResumeReason(state) || "compaction"}_resume_pending_loose_media`
+          : "compaction_locked_loose_media",
+      });
+      continue;
+    }
     const result = await handleTelegramMessagesInput({
       session,
       statePath,
@@ -4628,17 +4877,6 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
     });
     return null;
   }
-  if (reason === "proactive" && countNonBlankLines(compactionInputQueuePath(config, session.runtimeDir)) > 0) {
-    logSystem("proactive compaction resume skipped: queued TG input will continue");
-    patchState(statePath, state, {
-      compaction_recovery_resume_pending: false,
-      compaction_recovery_resume_reason: null,
-      compaction_recovery_resume_last_sent_at: null,
-      last_error: null,
-    });
-    return null;
-  }
-
   const promptBody = compactionResumePrompt(config, reason).trim();
   if (!promptBody) {
     patchState(statePath, state, {
@@ -4649,12 +4887,38 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
     return null;
   }
   const prompt = withSystemPulseHeader(config, promptBody);
+  let queuedMessages = [];
+  let queuedBuilt = null;
+
+  if ((reason === "proactive" || reason === "recovery") && countNonBlankLines(compactionInputQueuePath(config, session.runtimeDir)) > 0) {
+    queuedMessages = drainCompactionInputQueue(config, session.runtimeDir);
+    const prepared = await buildAndLogTelegramMessagesInput({
+      token: session.token,
+      runtimeDir: session.runtimeDir,
+      messages: queuedMessages,
+      config,
+      direction: `recv_compaction_${reason}_resume_guidance`,
+    });
+    if (prepared.handled) {
+      queuedBuilt = prepared.built;
+    } else {
+      requeueCompactionInputs({
+        config,
+        runtimeDir: session.runtimeDir,
+        messages: queuedMessages,
+        reason: `${reason}_resume_input_unhandled`,
+      });
+      queuedMessages = [];
+    }
+  }
 
   logBlock(t(config, "log.mainlineToCodex"), prompt);
   appendJsonl(path.join(session.runtimeDir, "telegram.jsonl"), {
     direction: reason === "proactive" ? "compaction_proactive_resume" : "compaction_recovery_resume",
     reason,
     chars: prompt.length,
+    queued_message_ids: queuedBuilt?.messageIds ?? [],
+    queued_messages: queuedMessages.length,
   });
   patchState(statePath, state, {
     compaction_recovery_resume_pending: false,
@@ -4664,14 +4928,48 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
   });
 
   try {
-    return await session.startTurn(prompt, {
+    const turn = await session.startTurn(prompt, {
       startup: !state.thread_id,
       startupSourceLabel: reason === "proactive"
         ? t(config, "compaction.proactiveResumeSourceLabel")
         : t(config, "compaction.resumeSourceLabel"),
       typingIndicator: false,
     });
+    if (queuedBuilt && queuedMessages.length > 0) {
+      try {
+        session.enableTypingIndicatorForCurrentTurn(`${reason}_compaction_resume_guidance`);
+        await session.steer(queuedBuilt.input);
+        appendJsonl(path.join(session.runtimeDir, "telegram.jsonl"), {
+          direction: reason === "proactive"
+            ? "compaction_proactive_resume_guidance_steered"
+            : "compaction_recovery_resume_guidance_steered",
+          active_turn_id: session.state.active_turn_id ?? turn.turnId ?? null,
+          message_ids: queuedBuilt.messageIds,
+          count: queuedMessages.length,
+        });
+      } catch (steerError) {
+        requeueCompactionInputs({
+          config,
+          runtimeDir: session.runtimeDir,
+          messages: queuedMessages,
+          reason: `${reason}_resume_steer_failed`,
+        });
+        const steerMessage = steerError?.stack || String(steerError);
+        patchState(statePath, state, { last_error: steerMessage });
+        appendJsonl(path.join(session.runtimeDir, "errors.jsonl"), { error: steerMessage });
+        logSystem(`compaction ${reason} resume guidance steer failed; messages requeued: ${steerError.message || steerError}`);
+      }
+    }
+    return turn;
   } catch (error) {
+    if (queuedMessages.length > 0) {
+      requeueCompactionInputs({
+        config,
+        runtimeDir: session.runtimeDir,
+        messages: queuedMessages,
+        reason: `${reason}_resume_start_failed`,
+      });
+    }
     const message = error?.stack || String(error);
     patchState(statePath, state, {
       compaction_recovery_resume_pending: true,
@@ -4681,6 +4979,87 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
     appendJsonl(path.join(session.runtimeDir, "errors.jsonl"), { error: message });
     logSystem(`compaction recovery resume turn failed: ${error.message || error}`);
     return null;
+  }
+}
+
+async function maybeSteerCompactionQueuedInputs({ session, config, state, statePath, token, runtimeDir }) {
+  if (!state.active_turn_id) return false;
+  if (isCompactionBlocked(state) || state.compacting_until) return false;
+  const resumeReason = state.compaction_recovery_resume_pending
+    ? String(state.compaction_recovery_resume_reason || "")
+    : null;
+  if (resumeReason && resumeReason !== "proactive" && resumeReason !== "recovery") return false;
+  if (resumeReason === "recovery" && !isCompactionRecoveryResumeReady(state)) return false;
+  if (state.compaction_recovery_model_active || state.compaction_recovery_restore_in_progress) return false;
+  if (countNonBlankLines(compactionReplayQueuePath(config, runtimeDir)) > 0) return false;
+
+  const messages = drainCompactionInputQueue(config, runtimeDir);
+  if (messages.length === 0) return false;
+
+  try {
+    logSystem(`steering queued TG inputs after compaction: count=${messages.length}, active_turn=${state.active_turn_id}`);
+    const prepared = await buildAndLogTelegramMessagesInput({
+      token,
+      runtimeDir,
+      messages,
+      config,
+      direction: "recv_compaction_guidance",
+    });
+    if (!prepared.handled) {
+      appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+        direction: "recv_compaction_guidance_unhandled",
+        message_ids: messages.map((message) => message.message_id).filter((id) => id !== null && id !== undefined),
+        count: messages.length,
+      });
+      return false;
+    }
+
+    let input = prepared.built.input;
+    if (resumeReason === "proactive" || resumeReason === "recovery") {
+      const promptBody = compactionResumePrompt(config, resumeReason).trim();
+      if (promptBody) {
+        input = prependTextToInput(withSystemPulseHeader(config, promptBody), input);
+      }
+    }
+
+    if (isResting(state)) {
+      clearRest(statePath, state, "compaction guidance");
+    }
+    patchState(statePath, state, { last_input_at: iso() });
+    session.state = loadState(statePath);
+    session.enableTypingIndicatorForCurrentTurn("compaction_guidance");
+    await session.steer(input);
+    if (resumeReason === "proactive" || resumeReason === "recovery") {
+      patchState(statePath, state, {
+        compaction_recovery_resume_pending: false,
+        compaction_recovery_resume_reason: null,
+        compaction_recovery_resume_last_sent_at: iso(),
+        last_error: null,
+      });
+    }
+    appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+      direction: resumeReason === "proactive"
+        ? "compaction_proactive_resume_guidance_steered"
+        : resumeReason === "recovery"
+          ? "compaction_recovery_resume_guidance_steered"
+          : "compaction_guidance_steered",
+      active_turn_id: state.active_turn_id,
+      message_ids: prepared.built.messageIds,
+      count: messages.length,
+    });
+    return true;
+  } catch (error) {
+    requeueCompactionInputs({
+      config,
+      runtimeDir,
+      messages,
+      reason: "compaction_guidance_steer_failed",
+    });
+    const message = error?.stack || String(error);
+    patchState(statePath, state, { last_error: message });
+    appendJsonl(path.join(runtimeDir, "errors.jsonl"), { error: message });
+    logSystem(`compaction guidance steer failed; messages requeued: ${error.message || error}`);
+    return false;
   }
 }
 
@@ -4738,7 +5117,7 @@ async function maybePreemptInputWithProactiveCompaction({
 }
 
 async function maybeRunCompactionQueuedInputs({ session, config, state, statePath, token, runtimeDir }) {
-  if (isCompactionBlocked(state) || state.compacting_until || state.active_turn_id) return null;
+  if (isCompactionBlocked(state) || state.compacting_until || state.active_turn_id || shouldStoreInputForCompactionResume(state)) return null;
   const replayInputs = drainCompactionReplayQueue(config, runtimeDir);
   if (replayInputs.length > 0) {
     const [replay, ...remaining] = replayInputs;
@@ -5145,6 +5524,19 @@ async function main() {
         return;
       }
       if (recoveryResumeTurn) {
+        continue;
+      }
+
+      state = reloadState();
+      const compactionGuidanceSteered = await maybeSteerCompactionQueuedInputs({
+        session,
+        config,
+        state,
+        statePath,
+        token: secrets.token,
+        runtimeDir,
+      });
+      if (compactionGuidanceSteered) {
         continue;
       }
 
@@ -5915,6 +6307,24 @@ async function main() {
             reason: "compaction_locked",
           });
           logSystem(`message queued: context compacting; queue=${queuePath}`);
+          await sendText({
+            token: secrets.token,
+            chatId: secrets.allowedChatId,
+            text: compactingQueuedNotice(config),
+            maxChars,
+            runtimeDir,
+            echo: true,
+          });
+          continue;
+        }
+        if (shouldStoreInputForCompactionResume(state)) {
+          const queuePath = enqueueCompactionInput({
+            config,
+            runtimeDir,
+            message,
+            reason: `${compactionResumeReason(state) || "compaction"}_resume_pending`,
+          });
+          logSystem(`message queued while compaction resume is pending; queue=${queuePath}`);
           await sendText({
             token: secrets.token,
             chatId: secrets.allowedChatId,

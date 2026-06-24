@@ -8,7 +8,7 @@
   "app_server_endpoint": "ws://127.0.0.1:48751",
   "app_server_fallback_port_scan": 10,
   "model": "gpt-5.5",
-  "service_tier": null,
+  "service_tier": "standard",
   "effort": "high",
   "sandbox_mode": "workspace-write",
   "sandbox_network_access": true,
@@ -83,8 +83,10 @@
   "compaction_recovery_resume_prompt": "【Codex Mainline】: Knock knock，从上下文压缩失败中恢复，压缩成功，需要继续任务。",
   "proactive_compaction_resume_prompt": "【Codex Mainline】: Knock knock，主动上下文压缩完成，需要继续压缩前的任务。",
   "compaction_input_queue_path": "runtime/tg_mainline/compaction_input_queue.jsonl",
+  "compaction_replay_queue_path": "runtime/tg_mainline/compaction_replay_queue.jsonl",
   "max_message_chars": 3500,
   "startup_context_paths": [
     "docs/operator-context.example.md"
-  ]
+  ],
+  "startup_autonomy_context_paths": []
 }
