@@ -36,6 +36,15 @@ const MAX_JSONL_BYTES = 64 * 1024 * 1024;
 const JSONL_REDIRECTS = new Map();
 const LARGE_JSONL_STRING_BYTES = 16 * 1024;
 const JSONL_PREVIEW_CHARS = 400;
+const INBOUND_FILE_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const INBOUND_TEXT_FILE_READ_MAX_BYTES = 512 * 1024;
+const INBOUND_TEXT_FILE_CONTEXT_MAX_CHARS = 24 * 1024;
+const INBOUND_TEXT_FILE_EXTENSIONS = new Set([
+  ".txt", ".md", ".markdown", ".json", ".jsonl", ".csv", ".tsv", ".xml",
+  ".yaml", ".yml", ".toml", ".ini", ".log", ".sql", ".py", ".js", ".mjs",
+  ".cjs", ".ts", ".tsx", ".jsx", ".css", ".html", ".htm", ".ps1", ".bat",
+  ".cmd", ".sh",
+]);
 
 function parseArgs(argv) {
   const options = {
@@ -1051,7 +1060,7 @@ async function sendDocumentLocal({ token, chatId, documentPath, caption, runtime
       chat_id: chatId,
       ...(caption ? { caption } : {}),
     },
-    files: { document: documentPath },
+    files: { file: documentPath },
   });
   appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
     direction: "send_document",
@@ -1059,7 +1068,7 @@ async function sendDocumentLocal({ token, chatId, documentPath, caption, runtime
     path: documentPath,
     caption_chars: String(caption || "").length,
   });
-  logSystem(`TG document sent: ${documentPath}`);
+  logSystem(`TG file sent: ${documentPath}`);
   return result;
 }
 
@@ -1265,6 +1274,23 @@ function isTelegramPhotoPath(filePath) {
   return [".jpg", ".jpeg", ".png", ".webp"].includes(path.extname(filePath).toLowerCase());
 }
 
+function isTelegramTextFile({ fileName, mimeType }) {
+  const ext = path.extname(String(fileName || "")).toLowerCase();
+  if (String(mimeType || "").startsWith("text/")) return true;
+  return INBOUND_TEXT_FILE_EXTENSIONS.has(ext);
+}
+
+function telegramFileDescriptor(message) {
+  const document = message?.document;
+  if (!document?.file_id) return null;
+  return {
+    fileId: document.file_id,
+    fileName: safeFileName(document.file_name || "file", "file"),
+    mimeType: String(document.mime_type || ""),
+    fileSize: Number(document.file_size || 0),
+  };
+}
+
 function xmlUnescape(value) {
   return String(value || "")
     .replace(/&quot;/g, '"')
@@ -1365,7 +1391,7 @@ function telegramMessageKind(message) {
   if (!message) return "unknown";
   if (typeof message.text === "string") return "text";
   if (Array.isArray(message.photo) && message.photo.length > 0) return "photo";
-  if (message.document) return String(message.document.mime_type || "").startsWith("image/") ? "document:image" : "document";
+  if (message.document) return String(message.document.mime_type || "").startsWith("image/") ? "file:image" : "file";
   if (message.sticker) return "sticker";
   if (message.animation) return "animation";
   if (message.video) return "video";
@@ -1387,7 +1413,7 @@ function telegramAttachmentSummary(message) {
   if (message?.document) {
     const fileName = message.document.file_name ? ` ${message.document.file_name}` : "";
     const mimeType = message.document.mime_type ? ` ${message.document.mime_type}` : "";
-    parts.push(`document${fileName}${mimeType}`.trim());
+    parts.push(`file${fileName}${mimeType}`.trim());
   }
   if (message?.sticker) {
     const emoji = message.sticker.emoji ? ` ${message.sticker.emoji}` : "";
@@ -1440,6 +1466,127 @@ async function downloadMessageImages({ token, message, runtimeDir }) {
   return imagePaths;
 }
 
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return "unknown";
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
+
+function inboundTextFileContent(filePath) {
+  const stat = statSync(filePath);
+  if (stat.size > INBOUND_TEXT_FILE_READ_MAX_BYTES) {
+    return {
+      readable: false,
+      reason: `text file exceeds read limit ${formatFileSize(INBOUND_TEXT_FILE_READ_MAX_BYTES)}`,
+    };
+  }
+  const buffer = readFileSync(filePath);
+  if (buffer.includes(0)) {
+    return { readable: false, reason: "file contains NUL bytes and is treated as binary" };
+  }
+  const text = buffer.toString("utf8").replace(/^\uFEFF/, "");
+  if (text.length > INBOUND_TEXT_FILE_CONTEXT_MAX_CHARS) {
+    return {
+      readable: true,
+      truncated: true,
+      text: text.slice(0, INBOUND_TEXT_FILE_CONTEXT_MAX_CHARS),
+      originalChars: text.length,
+    };
+  }
+  return { readable: true, truncated: false, text, originalChars: text.length };
+}
+
+async function downloadMessageFiles({ token, message, runtimeDir }) {
+  const descriptor = telegramFileDescriptor(message);
+  if (!descriptor) return [];
+
+  const baseDir = path.join(runtimeDir, "attachments", String(message.message_id ?? Date.now()));
+  mkdirSync(baseDir, { recursive: true });
+
+  const result = {
+    messageId: message.message_id ?? null,
+    fileName: descriptor.fileName,
+    mimeType: descriptor.mimeType,
+    fileSize: descriptor.fileSize,
+    path: null,
+    downloaded: false,
+    text: null,
+    error: null,
+  };
+
+  if (descriptor.fileSize > INBOUND_FILE_DOWNLOAD_MAX_BYTES) {
+    result.error = `file exceeds download limit ${formatFileSize(INBOUND_FILE_DOWNLOAD_MAX_BYTES)}`;
+    return [result];
+  }
+
+  try {
+    const file = await telegramApi(token, "getFile", { file_id: descriptor.fileId });
+    const fallbackExt = path.extname(descriptor.fileName) || ".bin";
+    const ext = extensionFromTelegramFile(file.file_path, fallbackExt);
+    const baseName = safeFileName(path.basename(descriptor.fileName, path.extname(descriptor.fileName)), "file");
+    const outputPath = path.join(baseDir, `${baseName}${ext}`);
+    if (!existsSync(outputPath) || statSync(outputPath).size <= 0) {
+      await downloadTelegramFile({ token, filePath: file.file_path, outputPath });
+    }
+    result.path = outputPath;
+    result.downloaded = true;
+
+    if (isTelegramTextFile(descriptor)) {
+      result.text = inboundTextFileContent(outputPath);
+    }
+  } catch (error) {
+    result.error = error?.message || String(error);
+  }
+
+  return [result];
+}
+
+function formatTelegramFileContext(config, fileItems) {
+  const files = Array.isArray(fileItems) ? fileItems : [];
+  if (files.length === 0) return "";
+  const lines = [
+    t(config, "telegramInput.fileHeader", {}, "[Telegram file attachments]"),
+  ];
+  for (const file of files) {
+    const unknown = t(config, "common.unknown", {}, "(unknown)");
+    lines.push(t(config, "telegramInput.fileName", { name: file.fileName || unknown }, "- file name: {name}"));
+    lines.push(t(config, "telegramInput.fileMessageId", { id: file.messageId ?? unknown }, "  message_id: {id}"));
+    lines.push(t(config, "telegramInput.fileMime", { mime: file.mimeType || unknown }, "  mime: {mime}"));
+    lines.push(t(config, "telegramInput.fileSize", { size: formatFileSize(file.fileSize) }, "  size: {size}"));
+    if (file.path) lines.push(t(config, "telegramInput.filePath", { path: file.path }, "  local path: {path}"));
+    if (file.error) {
+      lines.push(t(config, "telegramInput.fileStatus", { text: file.error }, "  status: {text}"));
+      continue;
+    }
+    if (file.text?.readable) {
+      const suffix = file.text.truncated
+        ? t(
+          config,
+          "telegramInput.fileTextTruncatedSuffix",
+          { limit: INBOUND_TEXT_FILE_CONTEXT_MAX_CHARS, chars: file.text.originalChars },
+          " (first {limit} chars, original {chars} chars)",
+        )
+        : "";
+      lines.push(t(config, "telegramInput.fileTextContent", { suffix }, "  text content{suffix}:"));
+      lines.push("```text");
+      lines.push(file.text.text);
+      lines.push("```");
+    } else if (file.text && !file.text.readable) {
+      lines.push(t(config, "telegramInput.fileTextUnreadable", { reason: file.text.reason }, "  text read: {reason}"));
+    } else if (file.downloaded) {
+      lines.push(t(
+        config,
+        "telegramInput.fileStatus",
+        { text: t(config, "telegramInput.fileBinaryStatus", {}, "downloaded; file body was not expanded") },
+        "  status: {text}",
+      ));
+    }
+  }
+  return lines.join("\n");
+}
+
 function normalizeTelegramMessages(messages) {
   const values = Array.isArray(messages) ? messages : [messages];
   const seen = new Set();
@@ -1465,9 +1612,12 @@ async function buildTelegramInputFromMessages({ token, messages, runtimeDir, con
     ? await downloadMessageImages({ token, message: replyMessage, runtimeDir })
     : [];
   const imagePaths = [];
+  const fileItems = [];
   for (const message of normalized) {
     imagePaths.push(...await downloadMessageImages({ token, message, runtimeDir }));
+    fileItems.push(...await downloadMessageFiles({ token, message, runtimeDir }));
   }
+  const fileContext = formatTelegramFileContext(config, fileItems);
 
   const incomingText = normalized
     .map((message) => telegramMessageText(message).trim())
@@ -1480,7 +1630,7 @@ async function buildTelegramInputFromMessages({ token, messages, runtimeDir, con
     .filter((id) => id !== null && id !== undefined);
 
   const currentContext = (() => {
-    if (replyContext || isGroup) {
+    if (replyContext || isGroup || fileContext) {
       const lines = [t(config, "telegramInput.currentHeader")];
       if (mediaGroupId) lines.push(`media_group_id: ${mediaGroupId}`);
       if (messageIds.length > 0) lines.push(`message_ids: ${messageIds.join(", ")}`);
@@ -1491,6 +1641,7 @@ async function buildTelegramInputFromMessages({ token, messages, runtimeDir, con
       } else {
         lines.push(t(config, "telegramInput.currentNoText"));
       }
+      if (fileContext) lines.push(fileContext);
       return lines.join("\n");
     }
     return incomingText || (imagePaths.length > 0 ? t(config, "telegramInput.imageOnly") : "");
@@ -1508,6 +1659,7 @@ async function buildTelegramInputFromMessages({ token, messages, runtimeDir, con
     ...replyImagePaths.map((imagePath) => `[quoted image] ${imagePath}`),
     currentContext,
     ...imagePaths.map((imagePath) => `[image] ${imagePath}`),
+    ...fileItems.map((file) => `[file] ${file.path || file.fileName || "unknown"}${file.error ? ` (${file.error})` : ""}`),
   ].filter(Boolean).join("\n");
 
   return {
@@ -1519,9 +1671,10 @@ async function buildTelegramInputFromMessages({ token, messages, runtimeDir, con
     replyMessage,
     incomingText,
     imagePaths,
+    fileItems,
     replyContext,
     replyImagePaths,
-    handled: Boolean(incomingText || imagePaths.length > 0 || replyContext || replyImagePaths.length > 0),
+    handled: Boolean(incomingText || imagePaths.length > 0 || fileItems.length > 0 || replyContext || replyImagePaths.length > 0),
   };
 }
 
@@ -3078,7 +3231,7 @@ class MainlineSession {
       onNotification: (message) => this.handleNotification(message),
     });
     await this.rpc.request("initialize", {
-      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.4" },
+      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.5" },
       capabilities: { experimentalApi: true, optOutNotificationMethods: [] },
     });
     logSystem("app-server websocket connected");
@@ -4531,6 +4684,7 @@ async function buildAndLogTelegramMessagesInput({
     media_group_id: built.mediaGroupId || null,
     chars: built.incomingText.length,
     images: built.imagePaths.length,
+    files: built.fileItems.length,
     has_reply: Boolean(built.replyMessage),
     reply_message_id: built.replyMessage?.message_id ?? null,
     reply_kind: built.replyMessage ? telegramMessageKind(built.replyMessage) : null,
@@ -4571,6 +4725,7 @@ async function handleTelegramMessagesInput({ session, statePath, token, runtimeD
       media_group_id: built.mediaGroupId || null,
       has_reply: Boolean(built.replyMessage),
       images: built.imagePaths.length,
+      files: built.fileItems.length,
       reply_images: built.replyImagePaths.length,
     },
   });
@@ -4946,6 +5101,7 @@ async function maybeRunCompactionRecoveryResume({ session, config, state, stateP
           active_turn_id: session.state.active_turn_id ?? turn.turnId ?? null,
           message_ids: queuedBuilt.messageIds,
           count: queuedMessages.length,
+          files: queuedBuilt.fileItems.length,
         });
       } catch (steerError) {
         requeueCompactionInputs({

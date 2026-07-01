@@ -8,7 +8,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 
 这个仓库只包含通用桥接代码。不包含凭据、运行日志、聊天历史、本地路径或项目私有资料。
 
-当前状态：公开桥接版本，支持双语桥接输出、watchdog 生命周期脚本、静态 sticker 图片输入和上下文压缩恢复。
+当前状态：公开桥接版本，支持双语桥接输出、watchdog 生命周期脚本、图片和文件输入，以及上下文压缩恢复。
 
 ## 为什么需要它
 
@@ -30,7 +30,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 
 - 持久 Codex app-server thread，保存在 `runtime/tg_mainline/state.json`。
 - 基于 Bot API long polling 的 Telegram 私聊桥接。
-- 把消息转入同一个 Codex 上下文，包括文本、caption、照片、图片文档、静态 sticker、媒体组和有边界的回复 / 引用上下文。
+- 把消息转入同一个 Codex 上下文，包括文本、caption、照片、图片文件、静态 sticker、Telegram 文件、媒体组和有边界的回复 / 引用上下文。
 - 将 assistant 回复转发回 Telegram。
 - 通过 `<tg_send_file path="..." />` 显式交付本地文件。
 - 桥接层机械输出支持双语：`zh-CN` 和 `en-US`。
@@ -245,7 +245,7 @@ PowerShell 脚本在 `scripts/` 下：
 <tg_send_file path="relative/or/absolute/path.ext" />
 ```
 
-桥接器会从可见文本中移除该标记，校验路径，并把图片作为 photo、其他文件作为 document 发送。`config/` 和 `runtime/` 下的文件禁止交付。
+桥接器会从可见文本中移除该标记，校验路径，并把图片作为 photo、其他文件通过 Telegram 文件上传发送。`config/` 和 `runtime/` 下的文件禁止交付。
 
 ## 边界
 

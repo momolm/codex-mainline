@@ -53,7 +53,18 @@
     "noReadableQuoted": "content: (no readable text or attachment summary)",
     "currentImages": "content: (the current message contains {count} image(s); see following image inputs.)",
     "currentNoText": "content: (the current message has no readable text.)",
-    "imageOnly": "(the current message contains an image; see following image input.)"
+    "imageOnly": "(the current message contains an image; see following image input.)",
+    "fileHeader": "[Telegram file attachments]",
+    "fileName": "- file name: {name}",
+    "fileMessageId": "  message_id: {id}",
+    "fileMime": "  mime: {mime}",
+    "fileSize": "  size: {size}",
+    "filePath": "  local path: {path}",
+    "fileStatus": "  status: {text}",
+    "fileTextContent": "  text content{suffix}:",
+    "fileTextTruncatedSuffix": " (first {limit} chars, original {chars} chars)",
+    "fileTextUnreadable": "  text read: {reason}",
+    "fileBinaryStatus": "downloaded; file body was not expanded"
   },
   "runDetails": {
     "title": "Codex run details{suffix} ({state})",

@@ -8,7 +8,7 @@ It is not a reverse proxy and does not impersonate the Codex desktop app. It run
 
 This repository contains the generic bridge code only. Credentials, runtime logs, chat history, local paths, and project-specific private material are not included.
 
-Current status: public bridge with bilingual output, watchdog lifecycle scripts, static sticker image input, and context-compaction recovery support.
+Current status: public bridge with bilingual output, watchdog lifecycle scripts, image and file input, and context-compaction recovery support.
 
 ## Why This Exists
 
@@ -30,7 +30,7 @@ The result is a three-part decoupling:
 
 - Persistent Codex app-server thread saved in `runtime/tg_mainline/state.json`.
 - Telegram private-chat bridge using Bot API long polling.
-- Message forwarding into the same Codex context, including text, captions, photos, image documents, static stickers, media groups, and bounded reply/quote context.
+- Message forwarding into the same Codex context, including text, captions, photos, image files, static stickers, Telegram files, media groups, and bounded reply/quote context.
 - Assistant replies relayed back to Telegram.
 - Explicit local file delivery with `<tg_send_file path="..." />`.
 - Bilingual bridge-layer mechanical output: `zh-CN` and `en-US`.
@@ -245,7 +245,7 @@ When Codex needs to send a local file to Telegram, it should include this marker
 <tg_send_file path="relative/or/absolute/path.ext" />
 ```
 
-The bridge removes the marker from visible text, validates the path, and sends images as photos and other files as documents. Files under `config/` and `runtime/` are blocked from delivery.
+The bridge removes the marker from visible text, validates the path, and sends images as photos and other files through Telegram file upload. Files under `config/` and `runtime/` are blocked from delivery.
 
 ## Boundaries
 
