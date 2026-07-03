@@ -1060,7 +1060,7 @@ async function sendDocumentLocal({ token, chatId, documentPath, caption, runtime
       chat_id: chatId,
       ...(caption ? { caption } : {}),
     },
-    files: { file: documentPath },
+    files: { document: documentPath },
   });
   appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
     direction: "send_document",
