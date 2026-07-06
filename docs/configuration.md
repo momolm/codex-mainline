@@ -48,7 +48,7 @@ Local file shape:
 - `codex_command`: command used to spawn Codex CLI when an app-server is not already ready.
 - `app_server_endpoint`: websocket URL for the app-server. The default is `ws://127.0.0.1:48751`.
 - `app_server_fallback_port_scan`: how many higher ports to scan when the configured endpoint is unavailable.
-- `model`: default Codex model.
+- `model`: default Codex model. `/model` can switch it at runtime using Codex's local visible model cache (`models_cache.json`).
 - `service_tier`: service tier for turns. The default config uses `standard`; set `fast` only when the connected account supports it.
 - `effort`: default reasoning effort.
 - `sandbox_mode`: `workspace-write`, `danger-full-access`, or `read-only`.

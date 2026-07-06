@@ -1,6 +1,7 @@
 {
   "botCommands": {
     "status": "Show Codex Mainline status",
+    "model": "Show or change default model",
     "effort": "Show or change default reasoning effort",
     "rhythm": "Show or change autonomous wake rhythm",
     "session": "Show or switch Codex session",
@@ -167,6 +168,7 @@
     "proactiveCompact": "proactive compact at: used >= {percent}%",
     "compactionRecovery": "compaction recovery: {value}",
     "compactionQueues": "compaction queues: input={input}, replay={replay}",
+    "model": "model: {value}",
     "nextWake": "next wake: {time}",
     "lastWake": "last wake: {time}",
     "wakeCount": "wake count: {count}",
@@ -174,6 +176,20 @@
     "lastVisibleOutput": "last codex visible output: {time}",
     "lastError": "last error: {value}",
     "rhythm": "rhythm: {value}"
+  },
+  "model": {
+    "current": "Current default model: {model}",
+    "available": "Available models:",
+    "usage": [
+      "Usage: /model",
+      "Usage: /model <model name or slug>"
+    ],
+    "note": "Note: the model list is read from Codex's local models_cache.json. This immediately changes the default model for future turns and writes settings to disk. A currently running turn is not changed mid-flight.",
+    "unsupported": "Unsupported model: {value}",
+    "ambiguous": "Ambiguous model: {value}. Matches: {matches}",
+    "changed": "Default model changed: {from} -> {to}",
+    "activeTurnNote": "A currently running turn will not change mid-flight; this takes effect on the next turn.",
+    "nextTurnNote": "This takes effect on the next turn; no restart is required."
   },
   "effort": {
     "current": "Current default effort: {effort}",

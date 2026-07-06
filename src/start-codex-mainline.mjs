@@ -2497,6 +2497,7 @@ function formatMainlineStatus(state, config) {
     ...formatRateLimitLines(config, state.rate_limits_snapshot),
     "",
     t(config, "status.activeTurn", { value: state.active_turn_id ? t(config, "common.yes") : t(config, "common.no") }),
+    t(config, "status.model", { value: config.model ?? "gpt-5.5" }),
     t(config, "status.effort", { value: normalizedEffort(config.effort) }),
     t(config, "status.resting", {
       value: isResting(state)
@@ -2530,6 +2531,108 @@ function formatMainlineStatus(state, config) {
 }
 
 const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
+
+function codexHomeDir() {
+  return process.env.CODEX_HOME
+    || (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, ".codex") : null)
+    || (process.env.HOME ? path.join(process.env.HOME, ".codex") : null);
+}
+
+function modelChoices(config) {
+  const current = String(config.model || "gpt-5.5").trim();
+  const home = codexHomeDir();
+  const modelsCachePath = home ? path.join(home, "models_cache.json") : null;
+  let models = [];
+  try {
+    const cache = modelsCachePath && existsSync(modelsCachePath) ? readJson(modelsCachePath) : null;
+    models = Array.isArray(cache?.models) ? cache.models : [];
+  } catch (error) {
+    logSystem(`Codex models cache read skipped: ${error.message || error}`);
+  }
+  const seen = new Set();
+  const choices = [];
+  const addChoice = (choice) => {
+    const id = String(choice?.slug || choice?.id || choice?.model || choice || "").trim();
+    if (!id) return;
+    const key = id.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const label = typeof choice === "object" && choice?.display_name
+      ? String(choice.display_name).trim()
+      : typeof choice === "object" && choice?.label
+        ? String(choice.label).trim()
+        : "";
+    const priority = Number.isFinite(Number(choice?.priority)) ? Number(choice.priority) : 9999;
+    choices.push({ id, label, priority });
+  };
+  for (const item of models) {
+    if (String(item?.visibility || "list") !== "list") continue;
+    addChoice(item);
+  }
+  addChoice({ id: current });
+  return choices.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+}
+
+function normalizedModelKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
+function modelChoiceKeys(choice) {
+  const keys = new Set([normalizedModelKey(choice.id), normalizedModelKey(choice.label)]);
+  const parts = String(choice.id || "").split("-").filter(Boolean);
+  for (let index = 1; index < parts.length; index += 1) {
+    const suffix = parts.slice(index).join("-");
+    if (suffix.length >= 3) keys.add(normalizedModelKey(suffix));
+  }
+  return [...keys].filter(Boolean);
+}
+
+function resolveModelChoice(config, value) {
+  const needle = normalizedModelKey(value);
+  if (!needle) return { choice: null, matches: [] };
+  const matches = modelChoices(config).filter((choice) => modelChoiceKeys(choice).includes(needle));
+  return { choice: matches.length === 1 ? matches[0] : null, matches };
+}
+
+function formatModelChoiceLine(choice, currentModel) {
+  const current = String(currentModel || "").trim().toLowerCase() === choice.id.toLowerCase();
+  const label = choice.label || choice.id;
+  const details = choice.id === label ? "" : ` (${choice.id})`;
+  return `${current ? "* " : "- "}${label}${details}`;
+}
+
+function modelUsageNotice(config) {
+  const choices = modelChoices(config);
+  return [
+    t(config, "model.current", { model: String(config.model || "gpt-5.5").trim() }),
+    "",
+    t(config, "model.available"),
+    ...choices.map((choice) => formatModelChoiceLine(choice, config.model)),
+    "",
+    ...tLines(config, "model.usage"),
+    "",
+    t(config, "model.note"),
+  ].join("\n");
+}
+
+function parseModelCommand(text) {
+  const value = String(text ?? "").trim();
+  if (value === "/model") return { action: "status" };
+  if (!value.startsWith("/model ")) return null;
+  return { action: "set", model: value.slice(7).trim() };
+}
+
+function updateConfigModel({ config, configPath, model }) {
+  const { choice } = resolveModelChoice(config, model);
+  if (!choice) {
+    throw new Error(`Unsupported model: ${model}`);
+  }
+  const diskConfig = readJson(configPath);
+  diskConfig.model = choice.id;
+  writeJson(configPath, diskConfig);
+  config.model = choice.id;
+  return choice.id;
+}
 
 function normalizedEffort(value) {
   const effort = String(value || "high").trim().toLowerCase();
@@ -5838,6 +5941,65 @@ async function main() {
             token: secrets.token,
             chatId: secrets.allowedChatId,
             text: formatMainlineStatus(state, config),
+            maxChars,
+            runtimeDir,
+            echo: true,
+          });
+          continue;
+        }
+        const modelCommand = parseModelCommand(slashText);
+        if (modelCommand) {
+          logBlock(t(config, "log.userToBridge"), slashText);
+          appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+            direction: "recv_command",
+            command: "/model",
+            action: modelCommand.action,
+            message_id: message.message_id ?? null,
+          });
+          if (modelCommand.action === "status") {
+            await sendText({
+              token: secrets.token,
+              chatId: secrets.allowedChatId,
+              text: modelUsageNotice(config),
+              maxChars,
+              runtimeDir,
+              echo: true,
+            });
+            continue;
+          }
+          const resolvedModel = resolveModelChoice(config, modelCommand.model);
+          if (!resolvedModel.choice) {
+            const errorText = resolvedModel.matches.length > 1
+              ? t(config, "model.ambiguous", {
+                value: modelCommand.model || t(config, "common.empty"),
+                matches: resolvedModel.matches.map((item) => item.id).join(", "),
+              })
+              : t(config, "model.unsupported", { value: modelCommand.model || t(config, "common.empty") });
+            await sendText({
+              token: secrets.token,
+              chatId: secrets.allowedChatId,
+              text: `${errorText}\n\n${modelUsageNotice(config)}`,
+              maxChars,
+              runtimeDir,
+              echo: true,
+            });
+            continue;
+          }
+          const previousModel = String(config.model || "gpt-5.5").trim();
+          const nextModel = updateConfigModel({
+            config,
+            configPath,
+            model: modelCommand.model,
+          });
+          logSystem(`default model changed: ${previousModel} -> ${nextModel}`);
+          await sendText({
+            token: secrets.token,
+            chatId: secrets.allowedChatId,
+            text: [
+              t(config, "model.changed", { from: previousModel, to: nextModel }),
+              state.active_turn_id ? t(config, "model.activeTurnNote") : t(config, "model.nextTurnNote"),
+              t(config, "common.writtenBack", { path: path.relative(WORKSPACE_ROOT, configPath) }),
+            ].join("\n"),
             maxChars,
             runtimeDir,
             echo: true,

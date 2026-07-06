@@ -36,6 +36,7 @@ The result is a three-part decoupling:
 - Bilingual bridge-layer mechanical output: `zh-CN` and `en-US`.
 - Bridge-level slash commands that do not enter model context:
   - `/status`
+  - `/model`
   - `/effort`
   - `/language`
   - `/rhythm`
@@ -222,7 +223,7 @@ Important fields:
 - `locale`, `fallback_locale`, `locales_dir`: bridge output language and locale catalog directory.
 - `codex_command`: command used to start Codex CLI.
 - `app_server_endpoint`: websocket endpoint for `codex app-server`.
-- `model`, `service_tier`, `effort`: default turn settings. `service_tier` defaults to `standard`; use `fast` only when the connected account supports it.
+- `model`, `service_tier`, `effort`: default turn settings. `/model` can switch the default model at runtime from Codex's local visible model cache. `service_tier` defaults to `standard`; use `fast` only when the connected account supports it.
 - `sandbox_mode`, `sandbox_network_access`, `sandbox_extra_writable_roots`: Codex sandbox policy for turns.
 - `bot_token_env`, `allowed_chat_id_env`, `telegram_api_proxy_url_env`: environment variable names.
 - `local_config_path`: ignored JSON file for local Telegram credentials.

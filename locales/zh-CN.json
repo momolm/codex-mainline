@@ -1,6 +1,7 @@
 {
   "botCommands": {
     "status": "查看 Codex Mainline 状态",
+    "model": "查看或切换默认模型",
     "effort": "查看或切换默认思考强度",
     "rhythm": "查看或切换自主激活周期",
     "session": "查看或切换 Codex session",
@@ -167,6 +168,7 @@
     "proactiveCompact": "proactive compact at: used >= {percent}%",
     "compactionRecovery": "compaction recovery: {value}",
     "compactionQueues": "compaction queues: input={input}, replay={replay}",
+    "model": "model: {value}",
     "nextWake": "next wake: {time}",
     "lastWake": "last wake: {time}",
     "wakeCount": "wake count: {count}",
@@ -174,6 +176,20 @@
     "lastVisibleOutput": "last codex visible output: {time}",
     "lastError": "last error: {value}",
     "rhythm": "rhythm: {value}"
+  },
+  "model": {
+    "current": "当前默认 model: {model}",
+    "available": "可选模型：",
+    "usage": [
+      "用法：/model",
+      "用法：/model <模型名或 slug>"
+    ],
+    "note": "说明：模型列表来自 Codex 本地 models_cache.json。这个命令会立即修改 TG 主线后续 turn 的默认模型，并写回 settings 文件；正在进行中的 turn 不会被中途改变。",
+    "unsupported": "不支持这个 model: {value}",
+    "ambiguous": "这个 model 输入不唯一: {value}。匹配项：{matches}",
+    "changed": "默认 model 已切换：{from} -> {to}",
+    "activeTurnNote": "当前正在进行的 turn 不会中途改变；下一轮开始生效。",
+    "nextTurnNote": "下一轮开始生效，无需重启。"
   },
   "effort": {
     "current": "当前默认 effort: {effort}",

@@ -36,6 +36,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 - 桥接层机械输出支持双语：`zh-CN` 和 `en-US`。
 - 不进入模型上下文的桥接层 slash commands：
   - `/status`
+  - `/model`
   - `/effort`
   - `/language`
   - `/rhythm`
@@ -213,7 +214,7 @@ PowerShell 脚本在 `scripts/` 下：
 - `locale`、`fallback_locale`、`locales_dir`：桥接输出语言和 locale catalog 目录。
 - `codex_command`：用于启动 Codex CLI 的命令。
 - `app_server_endpoint`：`codex app-server` 的 websocket endpoint。
-- `model`、`service_tier`、`effort`：默认 turn 设置。`service_tier` 默认是 `standard`；账号支持提速时可显式切到 `fast`。
+- `model`、`service_tier`、`effort`：默认 turn 设置。`/model` 可从 Codex 本地可见模型缓存中运行时切换默认模型。`service_tier` 默认是 `standard`；账号支持提速时可显式切到 `fast`。
 - `sandbox_mode`、`sandbox_network_access`、`sandbox_extra_writable_roots`：turn 的 Codex sandbox 策略。
 - `bot_token_env`、`allowed_chat_id_env`、`telegram_api_proxy_url_env`：环境变量名。
 - `local_config_path`：保存本地 Telegram 凭据的 ignored JSON 文件。
