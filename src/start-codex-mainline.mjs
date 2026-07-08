@@ -3334,7 +3334,7 @@ class MainlineSession {
       onNotification: (message) => this.handleNotification(message),
     });
     await this.rpc.request("initialize", {
-      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.5" },
+      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.8" },
       capabilities: { experimentalApi: true, optOutNotificationMethods: [] },
     });
     logSystem("app-server websocket connected");
@@ -5704,15 +5704,22 @@ async function main() {
   const compactionLocked = Boolean(isCompactionBlocked(state) || state.compacting_until);
   if (!compactionLocked) {
     appendLifecycle(runtimeDir, "startup_notice_begin");
-    await sendText({
-      token: secrets.token,
-      chatId: secrets.allowedChatId,
-      text: t(config, "main.started"),
-      maxChars,
-      runtimeDir,
-      echo: true,
-    });
-    appendLifecycle(runtimeDir, "startup_notice_sent");
+    try {
+      await sendText({
+        token: secrets.token,
+        chatId: secrets.allowedChatId,
+        text: t(config, "main.started"),
+        maxChars,
+        runtimeDir,
+        echo: true,
+      });
+      appendLifecycle(runtimeDir, "startup_notice_sent");
+    } catch (error) {
+      appendLifecycle(runtimeDir, "startup_notice_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      logSystem(`startup TG notice failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   } else {
     appendLifecycle(runtimeDir, "startup_notice_suppressed", {
       reason: "compaction_locked",
