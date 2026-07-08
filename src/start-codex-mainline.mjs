@@ -534,7 +534,36 @@ function processIsAlive(pid) {
   }
 }
 
-function acquireRuntimeLock(lockPath) {
+function windowsProcessCommandLine(pid) {
+  if (process.platform !== "win32" || !Number.isInteger(pid) || pid <= 0) return null;
+  const command = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -ErrorAction SilentlyContinue; if ($p) { [Console]::Out.Write($p.CommandLine) }`;
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", command], {
+    encoding: "utf8",
+    timeout: 3000,
+    windowsHide: true,
+    maxBuffer: 128 * 1024,
+  });
+  if (result.error || result.status !== 0) return null;
+  const stdout = String(result.stdout || "").trim();
+  return stdout || null;
+}
+
+function normalizePathFragment(value) {
+  return String(value || "").replace(/\\/g, "/").toLowerCase();
+}
+
+function lockOwnerIsAlive(lock) {
+  const pid = Number(lock?.pid);
+  if (!Number.isInteger(pid) || pid <= 0 || !processIsAlive(pid)) return false;
+  const script = optionalString(lock?.script);
+  if (!script) return true;
+  if (process.platform !== "win32") return true;
+  const commandLine = windowsProcessCommandLine(pid);
+  if (!commandLine) return false;
+  return normalizePathFragment(commandLine).includes(normalizePathFragment(script));
+}
+
+function acquireRuntimeLock(lockPath, metadata = {}) {
   mkdirSync(path.dirname(lockPath), { recursive: true });
   if (existsSync(lockPath)) {
     let existing = null;
@@ -543,7 +572,7 @@ function acquireRuntimeLock(lockPath) {
     } catch {
       existing = null;
     }
-    if (processIsAlive(existing?.pid)) {
+    if (lockOwnerIsAlive(existing)) {
       throw new Error(`Codex Mainline TG mainline is already running: pid=${existing.pid}`);
     }
     unlinkSync(lockPath);
@@ -551,7 +580,7 @@ function acquireRuntimeLock(lockPath) {
 
   const fd = openSync(lockPath, "wx");
   closeSync(fd);
-  writeJson(lockPath, { pid: process.pid, started_at: iso() });
+  writeJson(lockPath, { pid: process.pid, started_at: iso(), ...metadata });
 
   return () => {
     try {
@@ -567,6 +596,13 @@ function defaultState() {
   return {
     schema_version: 1,
     update_offset: 0,
+    telegram_bot_id: null,
+    telegram_bot_username: null,
+    telegram_bot_checked_at: null,
+    telegram_bot_switched_at: null,
+    telegram_previous_bot_id: null,
+    telegram_offset_rebased_at: null,
+    telegram_offset_rebased_reason: null,
     thread_id: null,
     active_turn_id: null,
     active_turn_started_at: null,
@@ -1099,6 +1135,146 @@ async function getUpdates({ token, offset, timeoutSeconds, runtimeDir }) {
     offset,
   });
   return updates;
+}
+
+async function getBotIdentity({ token, runtimeDir }) {
+  const me = await telegramApi(token, "getMe", {});
+  const id = finiteInteger(me?.id);
+  if (id === null || id <= 0) {
+    throw new Error("getMe did not return a valid bot id");
+  }
+  const identity = {
+    id: String(id),
+    username: optionalString(me?.username),
+  };
+  appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+    direction: "bot_identity",
+    bot_id: identity.id,
+    username: identity.username,
+  });
+  return identity;
+}
+
+function updateIdList(updates) {
+  return updates
+    .map((update) => finiteInteger(update?.update_id))
+    .filter((id) => id !== null && id >= 0);
+}
+
+async function peekFirstUpdateAtOffset({ token, offset, runtimeDir }) {
+  const updates = await telegramApi(token, "getUpdates", {
+    offset,
+    limit: 1,
+    timeout: 0,
+    allowed_updates: ["message"],
+  });
+  const ids = updateIdList(updates);
+  const firstUpdateId = ids.length > 0 ? ids[0] : null;
+  appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+    direction: "update_offset_probe",
+    offset,
+    count: updates.length,
+    first_update_id: firstUpdateId,
+  });
+  return { count: updates.length, firstUpdateId };
+}
+
+async function resetUpdateOffsetToPendingTail({ token, runtimeDir }) {
+  const updates = await telegramApi(token, "getUpdates", {
+    offset: -1,
+    limit: 1,
+    timeout: 0,
+    allowed_updates: ["message"],
+  });
+  const ids = updateIdList(updates);
+  const latestUpdateId = ids.length > 0 ? Math.max(...ids) : null;
+  const nextOffset = latestUpdateId === null ? 0 : latestUpdateId + 1;
+  appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+    direction: "update_offset_tail_reset",
+    offset: -1,
+    count: updates.length,
+    latest_update_id: latestUpdateId,
+    next_offset: nextOffset,
+  });
+  return { nextOffset, latestUpdateId, count: updates.length };
+}
+
+async function syncTelegramBotState({ token, runtimeDir, statePath, state }) {
+  const identity = await getBotIdentity({ token, runtimeDir });
+  const previousBotId = optionalString(state.telegram_bot_id);
+  const currentOffset = Math.max(0, finiteInteger(state.update_offset) ?? 0);
+  let resetReason = null;
+  let resetResult = null;
+
+  if (previousBotId && previousBotId !== identity.id) {
+    resetReason = "bot_id_changed";
+  } else if (currentOffset > 0) {
+    const probe = await peekFirstUpdateAtOffset({ token, offset: currentOffset, runtimeDir });
+    if (probe.firstUpdateId !== null && probe.firstUpdateId < currentOffset) {
+      resetReason = previousBotId ? "offset_ahead_of_queue" : "missing_bot_id_offset_ahead_of_queue";
+    }
+  }
+
+  if (resetReason) {
+    resetResult = await resetUpdateOffsetToPendingTail({ token, runtimeDir });
+  }
+
+  const patch = {
+    telegram_bot_id: identity.id,
+    telegram_bot_username: identity.username,
+    telegram_bot_checked_at: iso(),
+  };
+  if (previousBotId && previousBotId !== identity.id) {
+    patch.telegram_previous_bot_id = previousBotId;
+    patch.telegram_bot_switched_at = iso();
+  }
+  if (resetReason) {
+    patch.update_offset = resetResult.nextOffset;
+    patch.telegram_offset_rebased_at = iso();
+    patch.telegram_offset_rebased_reason = resetReason;
+    appendLifecycle(runtimeDir, "telegram_update_offset_rebased", {
+      reason: resetReason,
+      previous_bot_id: previousBotId,
+      bot_id: identity.id,
+      previous_offset: currentOffset,
+      next_offset: resetResult.nextOffset,
+      latest_update_id: resetResult.latestUpdateId,
+      pending_tail_count: resetResult.count,
+    });
+  } else {
+    appendLifecycle(runtimeDir, "telegram_bot_identity_ready", {
+      bot_id: identity.id,
+      username: identity.username,
+      update_offset: currentOffset,
+    });
+  }
+
+  return patchState(statePath, state, patch);
+}
+
+function nextUpdateOffsetForUpdate({ state, updateId, runtimeDir }) {
+  const currentOffset = Math.max(0, finiteInteger(state.update_offset) ?? 0);
+  const id = finiteInteger(updateId);
+  if (id === null || id < 0) return currentOffset;
+  const nextOffset = id + 1;
+  if (currentOffset > 0 && nextOffset < currentOffset) {
+    appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+      direction: "update_offset_rebased",
+      reason: "observed_lower_update_id",
+      previous_offset: currentOffset,
+      update_id: id,
+      next_offset: nextOffset,
+    });
+    appendLifecycle(runtimeDir, "telegram_update_offset_rebased", {
+      reason: "observed_lower_update_id",
+      previous_offset: currentOffset,
+      update_id: id,
+      next_offset: nextOffset,
+      bot_id: optionalString(state.telegram_bot_id),
+    });
+    return nextOffset;
+  }
+  return Math.max(currentOffset, nextOffset);
 }
 
 function compactionInputQueuePath(config, runtimeDir) {
@@ -5602,7 +5778,10 @@ async function main() {
   } catch {
     // Best effort.
   }
-  const releaseLock = acquireRuntimeLock(path.join(runtimeDir, "mainline.lock.json"));
+  const releaseLock = acquireRuntimeLock(path.join(runtimeDir, "mainline.lock.json"), {
+    kind: "telegram_mainline",
+    script: path.relative(WORKSPACE_ROOT, fileURLToPath(import.meta.url)),
+  });
   appendLifecycle(runtimeDir, "runtime_lock_acquired", {
     lock_path: path.relative(WORKSPACE_ROOT, path.join(runtimeDir, "mainline.lock.json")),
   });
@@ -5634,6 +5813,19 @@ async function main() {
   });
 
   printHeader(t(config, "main.startTitle"));
+  try {
+    state = await syncTelegramBotState({
+      token: secrets.token,
+      runtimeDir,
+      statePath,
+      state,
+    });
+  } catch (error) {
+    appendLifecycle(runtimeDir, "telegram_bot_identity_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    logSystem(`telegram bot identity check failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   try {
     await ensureBotCommands({
       token: secrets.token,
@@ -5868,8 +6060,13 @@ async function main() {
       });
 
       for (const update of updates) {
+        const nextUpdateOffset = nextUpdateOffsetForUpdate({
+          state,
+          updateId: update.update_id,
+          runtimeDir,
+        });
         patchState(statePath, state, {
-          update_offset: Math.max(Number(state.update_offset || 0), update.update_id + 1),
+          update_offset: nextUpdateOffset,
         });
         const message = update.message;
         if (!isAllowedPrivateMessage(message, secrets.allowedChatId)) continue;
