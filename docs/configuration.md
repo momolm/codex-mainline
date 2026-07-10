@@ -50,7 +50,7 @@ Local file shape:
 - `app_server_fallback_port_scan`: how many higher ports to scan when the configured endpoint is unavailable.
 - `model`: default Codex model. `/model` can switch it at runtime using Codex's local visible model cache (`models_cache.json`).
 - `service_tier`: service tier for turns. The default config uses `standard`; set `fast` only when the connected account supports it.
-- `effort`: default reasoning effort.
+- `effort`: default reasoning effort. The default is `xhigh`; `/effort` reads the selected model's `supported_reasoning_levels` from Codex's local `models_cache.json`, so model-specific levels do not require bridge updates.
 - `sandbox_mode`: `workspace-write`, `danger-full-access`, or `read-only`.
 - `sandbox_network_access`: whether turns may use network in sandboxed modes.
 - `sandbox_extra_writable_roots`: additional writable roots for `workspace-write`.

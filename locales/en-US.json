@@ -193,13 +193,13 @@
   },
   "effort": {
     "current": "Current default effort: {effort}",
+    "model": "Current model: {model}",
+    "available": "Available efforts:",
+    "unavailable": "The local Codex model cache does not advertise effort levels for the current model.",
     "usage": [
-      "Usage: /effort low",
-      "Usage: /effort medium",
-      "Usage: /effort high",
-      "Usage: /effort xhigh"
+      "Usage: /effort <level>"
     ],
-    "note": "Note: this immediately changes the default reasoning effort for future turns and writes settings to disk. A currently running turn is not changed mid-flight.",
+    "note": "Note: available levels come from the local Codex model cache. This immediately changes the default reasoning effort for future turns and writes settings to disk. A currently running turn is not changed mid-flight.",
     "unsupported": "Unsupported effort: {value}",
     "changed": "Default effort changed: {from} -> {to}",
     "activeTurnNote": "A currently running turn will not change mid-flight; this takes effect on the next turn.",

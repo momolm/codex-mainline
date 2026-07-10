@@ -28,6 +28,7 @@ const DEFAULT_CONFIG = path.join(
   "config",
   "codex-mainline.settings.json",
 );
+const DEFAULT_EFFORT = "xhigh";
 
 let TELEGRAM_PROXY_URL = null;
 let DEBUG_RAW = false;
@@ -2193,7 +2194,7 @@ function compactionRecoveryStep(attempt) {
 function compactionDefaultStep(config) {
   return {
     model: String(config.model || "gpt-5.5"),
-    effort: String(config.effort || "high"),
+    effort: String(config.effort || DEFAULT_EFFORT),
   };
 }
 
@@ -2674,7 +2675,7 @@ function formatMainlineStatus(state, config) {
     "",
     t(config, "status.activeTurn", { value: state.active_turn_id ? t(config, "common.yes") : t(config, "common.no") }),
     t(config, "status.model", { value: config.model ?? "gpt-5.5" }),
-    t(config, "status.effort", { value: normalizedEffort(config.effort) }),
+    t(config, "status.effort", { value: configuredEffort(config) }),
     t(config, "status.resting", {
       value: isResting(state)
         ? t(config, "status.until", { time: formatBeijingTime(state.rest_until, config) })
@@ -2705,8 +2706,6 @@ function formatMainlineStatus(state, config) {
   ];
   return lines.join("\n");
 }
-
-const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 
 function codexHomeDir() {
   return process.env.CODEX_HOME
@@ -2739,10 +2738,25 @@ function modelChoices(config) {
         ? String(choice.label).trim()
         : "";
     const priority = Number.isFinite(Number(choice?.priority)) ? Number(choice.priority) : 9999;
-    choices.push({ id, label, priority });
+    const reasoningLevels = Array.isArray(choice?.supported_reasoning_levels)
+      ? choice.supported_reasoning_levels
+        .map((item) => {
+          const effort = String(typeof item === "object" ? item?.effort || "" : item || "").trim().toLowerCase();
+          if (!effort) return null;
+          const description = typeof item === "object"
+            ? String(item?.description || "").trim()
+            : "";
+          return { effort, description };
+        })
+        .filter(Boolean)
+      : [];
+    const defaultReasoningLevel = String(choice?.default_reasoning_level || "").trim().toLowerCase();
+    choices.push({ id, label, priority, reasoningLevels, defaultReasoningLevel });
   };
   for (const item of models) {
-    if (String(item?.visibility || "list") !== "list") continue;
+    const id = String(item?.slug || item?.id || item?.model || "").trim();
+    const isCurrent = id.toLowerCase() === current.toLowerCase();
+    if (String(item?.visibility || "list") !== "list" && !isCurrent) continue;
     addChoice(item);
   }
   addChoice({ id: current });
@@ -2810,14 +2824,44 @@ function updateConfigModel({ config, configPath, model }) {
   return choice.id;
 }
 
-function normalizedEffort(value) {
-  const effort = String(value || "high").trim().toLowerCase();
-  return VALID_EFFORTS.has(effort) ? effort : "high";
+function currentModelChoice(config) {
+  const current = String(config.model || "").trim().toLowerCase();
+  return modelChoices(config).find((choice) => choice.id.toLowerCase() === current) ?? null;
+}
+
+function effortCatalog(config) {
+  const model = currentModelChoice(config);
+  const choices = model?.reasoningLevels ?? [];
+  const configured = String(config.effort || "").trim().toLowerCase();
+  const preferred = choices.find((choice) => choice.effort === DEFAULT_EFFORT)?.effort || "";
+  const current = configured || preferred || model?.defaultReasoningLevel || choices[0]?.effort || DEFAULT_EFFORT;
+  return { choices, current };
+}
+
+function configuredEffort(config) {
+  return effortCatalog(config).current;
+}
+
+function resolveEffortChoice(config, value) {
+  const effort = String(value || "").trim().toLowerCase();
+  return effortCatalog(config).choices.find((choice) => choice.effort === effort) ?? null;
+}
+
+function formatEffortChoiceLine(choice, currentEffort) {
+  const current = choice.effort === String(currentEffort || "").trim().toLowerCase();
+  const details = choice.description ? ` - ${choice.description}` : "";
+  return `${current ? "* " : "- "}${choice.effort}${details}`;
 }
 
 function effortUsageNotice(config) {
+  const { choices, current } = effortCatalog(config);
   return [
-    t(config, "effort.current", { effort: normalizedEffort(config.effort) }),
+    t(config, "effort.current", { effort: current }),
+    t(config, "effort.model", { model: String(config.model || "").trim() || t(config, "common.unset") }),
+    "",
+    ...(choices.length > 0
+      ? [t(config, "effort.available"), ...choices.map((choice) => formatEffortChoiceLine(choice, current))]
+      : [t(config, "effort.unavailable")]),
     "",
     ...tLines(config, "effort.usage"),
     "",
@@ -2833,10 +2877,11 @@ function parseEffortCommand(text) {
 }
 
 function updateConfigEffort({ config, configPath, effort }) {
-  const nextEffort = normalizedEffort(effort);
-  if (nextEffort !== effort) {
+  const choice = resolveEffortChoice(config, effort);
+  if (!choice) {
     throw new Error(`Unsupported effort: ${effort}`);
   }
+  const nextEffort = choice.effort;
   const diskConfig = readJson(configPath);
   diskConfig.effort = nextEffort;
   writeJson(configPath, diskConfig);
@@ -3723,7 +3768,7 @@ class MainlineSession {
 
   turnParams(threadId, prompt, options = {}) {
     const serviceTier = optionalString(this.config.service_tier);
-    const effort = String(options.effort || this.config.effort || "high");
+    const effort = String(options.effort || this.config.effort || DEFAULT_EFFORT);
     const model = String(options.model || this.config.model || "gpt-5.5");
     const params = {
       threadId,
@@ -3746,7 +3791,7 @@ class MainlineSession {
 
   collaborationMode(mode, options = {}) {
     const model = String(options.model || this.config.model || "gpt-5.5");
-    const effort = String(options.effort || this.config.effort || "high");
+    const effort = String(options.effort || this.config.effort || DEFAULT_EFFORT);
     return {
       mode,
       settings: {
@@ -5752,7 +5797,7 @@ async function main() {
       appServerEndpoint: config.app_server_endpoint,
       model: config.model ?? "gpt-5.5",
       serviceTier: optionalString(config.service_tier) ?? "standard",
-      effort: config.effort ?? "high",
+      effort: config.effort ?? DEFAULT_EFFORT,
       botCommands: config.bot_commands_enabled === false
         ? t(config, "common.disabled")
         : configuredBotCommands(config).map((item) => `/${item.command}`).join(", ") || t(config, "common.none"),
@@ -5845,7 +5890,7 @@ async function main() {
     `thread: ${state.thread_id ?? "(new on first turn)"}`,
     `endpoint: ${config.app_server_endpoint}`,
     `model: ${config.model ?? "gpt-5.5"}`,
-    `effort: ${config.effort ?? "high"}`,
+    `effort: ${config.effort ?? DEFAULT_EFFORT}`,
     rhythmEnabled(config)
       ? `rhythm: ${rhythmIntervalSeconds(config)}s, message="${rhythmMessage(config)}"`
       : "rhythm: disabled",
@@ -6230,7 +6275,7 @@ async function main() {
             });
             continue;
           }
-          if (!VALID_EFFORTS.has(effortCommand.effort)) {
+          if (!resolveEffortChoice(config, effortCommand.effort)) {
             await sendText({
               token: secrets.token,
               chatId: secrets.allowedChatId,
@@ -6241,7 +6286,7 @@ async function main() {
             });
             continue;
           }
-          const previousEffort = normalizedEffort(config.effort);
+          const previousEffort = configuredEffort(config);
           const nextEffort = updateConfigEffort({
             config,
             configPath,

@@ -9,7 +9,7 @@
   "app_server_fallback_port_scan": 10,
   "model": "gpt-5.5",
   "service_tier": "standard",
-  "effort": "high",
+  "effort": "xhigh",
   "sandbox_mode": "workspace-write",
   "sandbox_network_access": true,
   "sandbox_extra_writable_roots": [],
