@@ -79,7 +79,7 @@
     "en-US": "prompts/work_budget_rest.en-US.md"
   },
   "rest_seconds": 600,
-  "context_compaction_trigger_used_percent": 85,
+  "context_compaction_trigger_used_percent": 90,
   "compaction_recovery_max_attempts": 1,
   "compacting_seconds": 600,
   "compaction_recovery_pause_prompt": {

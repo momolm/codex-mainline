@@ -46,7 +46,9 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
   - `/computer`
   - `/stop`
   - `/plan`
+- 可选安装的 `$effort` skill：在持续任务中由 Codex 主动判断，并在 `high`、`xhigh`、`max` 三档间持久换挡。
 - 上下文压缩保护：
+  - 默认在上下文使用率达到 90% 时主动压缩；
   - 发送压缩开始 / 完成 / 失败 / 超时的 Telegram 通知；
   - 压缩期间对普通消息排队；
   - 压缩失败后使用 `gpt-5.4-mini low` 发送短暂停 turn，以触发原生压缩恢复；
@@ -225,10 +227,12 @@ PowerShell 脚本在 `scripts/` 下：
 - `startup_autonomy_context_paths`：只在自主唤醒启动 prompt 中额外列出的文件。
 - `rhythm_*`：可选自主唤醒设置。`rhythm_enabled` 默认是 `false`；需要时用 `/rhythm on` 或配置显式开启。
 - `work_budget_*`：长 turn 收尾设置。
-- `context_compaction_*`、`compaction_recovery_*` 和 `compacting_*`：压缩触发、暂停 turn 恢复和用户可见行为。
+- `context_compaction_*`、`compaction_recovery_*` 和 `compacting_*`：压缩触发、暂停 turn 恢复和用户可见行为；主动压缩默认阈值为 90%。
 - `compaction_input_queue_path` 和 `compaction_replay_queue_path`：压缩期间收到的输入队列，以及压缩失败后受保护输入的重放队列。
 
 详见 [docs/configuration.md](docs/configuration.md)。
+
+可选持久 `$effort` skill 的安装和使用方式见 [docs/effort-skill.md](docs/effort-skill.md)。
 
 ## 启动上下文
 

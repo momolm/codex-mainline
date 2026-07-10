@@ -119,7 +119,7 @@
     "failed": "Codex Mainline 上下文压缩失败了，正在等待下一步压缩恢复。",
     "timedOutNext": "Codex Mainline 上下文压缩没有返回完成事件，正在切到 {step} 发送暂停请求以触发原生压缩恢复。",
     "timedOut": "Codex Mainline 上下文压缩没有返回完成事件，正在等待下一步压缩恢复。",
-    "exhausted": "Codex Mainline 上下文压缩恢复请求已尝试 {maxAttempts} 次，已停止自动恢复。后续请求会暂用 gpt-5.4-mini low；压缩成功后恢复默认模型。",
+    "exhausted": "Codex Mainline 上下文压缩恢复请求已尝试 {maxAttempts} 次，已停止自动恢复。后续请求会暂用 gpt-5.4-mini low；压缩成功后恢复当前默认模型与 effort。",
     "pausePrompt": "【Codex Mainline】: 上下文压缩失败，当前进入压缩恢复态。请暂停一切行动：不要读取文件，不要调用工具，不要推进任务，不要展开新分析；只简短确认“已暂停，等待上下文压缩恢复”。",
     "pauseSourceLabel": "Codex Mainline 压缩恢复暂停",
     "resumePrompt": "【Codex Mainline】: Knock knock，上下文压缩失败链路已经恢复并压缩成功，需要继续任务。",
@@ -203,7 +203,9 @@
     "unsupported": "不支持这个 effort: {value}",
     "changed": "默认 effort 已切换：{from} -> {to}",
     "activeTurnNote": "当前正在进行的 turn 不会中途改变；下一轮开始生效。",
-    "nextTurnNote": "下一轮开始生效，无需重启。"
+    "nextTurnNote": "下一轮开始生效，无需重启。",
+    "shiftResume": "【Codex Mainline】: 思考强度已切换为 {effort}，继续上一轮任务。",
+    "shiftSourceLabel": "Codex Mainline effort 换挡"
   },
   "language": {
     "current": "当前语言: {locale}",

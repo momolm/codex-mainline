@@ -79,7 +79,7 @@
     "en-US": "prompts/work_budget_rest.en-US.md"
   },
   "rest_seconds": 600,
-  "context_compaction_trigger_used_percent": 85,
+  "context_compaction_trigger_used_percent": 90,
   "compaction_recovery_max_attempts": 1,
   "compacting_seconds": 600,
   "compaction_recovery_pause_prompt": "【Codex Mainline】: 上下文压缩失败，当前进入压缩恢复态。请暂停一切行动：不要读取文件，不要调用工具，不要推进任务，不要展开新分析；只简短确认“已暂停，等待上下文压缩恢复”。",

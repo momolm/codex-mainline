@@ -1,0 +1,6 @@
+interface:
+  display_name: "Effort"
+  short_description: "Shift persistent reasoning gears for Codex Mainline work"
+  default_prompt: "Use $effort to shift Codex Mainline to the appropriate persistent reasoning gear and continue."
+policy:
+  allow_implicit_invocation: true

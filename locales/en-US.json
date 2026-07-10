@@ -119,7 +119,7 @@
     "failed": "Codex Mainline context compaction failed and is waiting for the next recovery step.",
     "timedOutNext": "Codex Mainline context compaction did not emit a completion event. Switching to {step} and sending a pause turn to trigger native compaction recovery.",
     "timedOut": "Codex Mainline context compaction did not emit a completion event and is waiting for the next recovery step.",
-    "exhausted": "Codex Mainline context compaction recovery was attempted {maxAttempts} time(s) and automatic recovery has stopped. Later turns will temporarily use gpt-5.4-mini low; the default model is restored after compaction succeeds.",
+    "exhausted": "Codex Mainline context compaction recovery was attempted {maxAttempts} time(s) and automatic recovery has stopped. Later turns will temporarily use gpt-5.4-mini low; the current default model and effort are restored after compaction succeeds.",
     "pausePrompt": "[Codex Mainline]: Context compaction failed and recovery mode is active. Pause all actions: do not read files, call tools, continue tasks, or start new analysis. Reply only with: paused, waiting for context compaction recovery.",
     "pauseSourceLabel": "Codex Mainline compaction recovery pause",
     "resumePrompt": "[Codex Mainline]: Knock knock. The failed context-compaction chain has recovered and compaction succeeded; continue the task.",
@@ -203,7 +203,9 @@
     "unsupported": "Unsupported effort: {value}",
     "changed": "Default effort changed: {from} -> {to}",
     "activeTurnNote": "A currently running turn will not change mid-flight; this takes effect on the next turn.",
-    "nextTurnNote": "This takes effect on the next turn; no restart is required."
+    "nextTurnNote": "This takes effect on the next turn; no restart is required.",
+    "shiftResume": "[Codex Mainline]: Reasoning effort changed to {effort}. Continue the previous task.",
+    "shiftSourceLabel": "Codex Mainline effort shift"
   },
   "language": {
     "current": "Current language: {locale}",

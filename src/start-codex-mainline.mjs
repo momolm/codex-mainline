@@ -21,6 +21,8 @@ import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import { evaluateEffortShiftRequest } from "./effort-shift-request.mjs";
+
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = path.resolve(SCRIPT_DIR, "..");
 const DEFAULT_CONFIG = path.join(
@@ -608,6 +610,9 @@ function defaultState() {
     active_turn_id: null,
     active_turn_started_at: null,
     active_turn_computer_use: false,
+    last_turn_id: null,
+    last_turn_status: null,
+    last_turn_completed_at: null,
     last_input_at: null,
     last_output_at: null,
     last_codex_visible_output_at: null,
@@ -2208,7 +2213,7 @@ function compactionTurnOverride(state) {
 
 function contextCompactionTriggerUsedPercent(config) {
   const configured = finiteNumber(config.context_compaction_trigger_used_percent);
-  if (configured === null) return 85;
+  if (configured === null) return 90;
   return Math.max(50, Math.min(99, configured));
 }
 
@@ -2887,6 +2892,38 @@ function updateConfigEffort({ config, configPath, effort }) {
   writeJson(configPath, diskConfig);
   config.effort = nextEffort;
   return nextEffort;
+}
+
+function turnRequestPath(runtimeDir) {
+  return path.join(runtimeDir, "turn.request.json");
+}
+
+function turnRequestLogPath(runtimeDir) {
+  return path.join(runtimeDir, "turn_requests.jsonl");
+}
+
+function clearPendingEffortShiftRequest({ runtimeDir, reason }) {
+  const requestPath = turnRequestPath(runtimeDir);
+  if (!existsSync(requestPath)) return null;
+
+  let request = null;
+  try {
+    request = readJson(requestPath);
+  } catch {
+    // A malformed request is still safe to remove at an explicit cancellation boundary.
+  }
+  if (request?.action && request.action !== "set_effort_and_continue") return null;
+
+  unlinkSync(requestPath);
+  appendJsonl(turnRequestLogPath(runtimeDir), {
+    event: "effort_shift_cancelled",
+    request_id: request?.request_id ?? null,
+    thread_id: request?.thread_id ?? null,
+    origin_turn_id: request?.origin_turn_id ?? null,
+    effort: request?.effort ?? null,
+    reason,
+  });
+  return request;
 }
 
 function languageUsageNotice(config) {
@@ -4863,6 +4900,9 @@ class MainlineSession {
         active_turn_id: null,
         active_turn_started_at: null,
         active_turn_computer_use: false,
+        last_turn_id: turnId ?? null,
+        last_turn_status: String(status),
+        last_turn_completed_at: iso(),
         last_error: failed ? this.state.last_error : null,
       };
       if (turnId && this.state.compaction_protected_turn?.turn_id === turnId) {
@@ -5566,6 +5606,109 @@ async function maybeRunProactiveContextCompaction({ session, config, state }) {
   }
 }
 
+async function maybeRunEffortShiftContinuation({
+  session,
+  config,
+  configPath,
+  state,
+  statePath,
+  runtimeDir,
+}) {
+  const requestPath = turnRequestPath(runtimeDir);
+  if (!existsSync(requestPath)) return null;
+  if (isCompactionBlocked(state) || state.compacting_until || state.active_turn_id || isResting(state)) {
+    return null;
+  }
+
+  let request;
+  try {
+    request = readJson(requestPath);
+  } catch (error) {
+    unlinkSync(requestPath);
+    appendJsonl(turnRequestLogPath(runtimeDir), {
+      event: "effort_shift_rejected",
+      reason: "invalid_json",
+      error: compactOneLine(error?.message || error, 300),
+    });
+    logSystem("effort shift request rejected: invalid_json");
+    return null;
+  }
+
+  const evaluation = evaluateEffortShiftRequest({
+    request,
+    state,
+    isEffortSupported: (effort) => Boolean(resolveEffortChoice(config, effort)),
+  });
+  if (evaluation.decision === "wait") return null;
+  if (evaluation.decision === "reject") {
+    unlinkSync(requestPath);
+    appendJsonl(turnRequestLogPath(runtimeDir), {
+      event: "effort_shift_rejected",
+      request_id: request?.request_id ?? null,
+      thread_id: request?.thread_id ?? null,
+      origin_turn_id: request?.origin_turn_id ?? null,
+      effort: request?.effort ?? null,
+      reason: evaluation.reason,
+    });
+    logSystem(`effort shift request rejected: ${evaluation.reason}`);
+    return null;
+  }
+
+  const previousEffort = configuredEffort(config);
+  const prompt = withSystemPulseHeader(
+    config,
+    t(config, "effort.shiftResume", { effort: evaluation.effort }),
+  );
+  let turn = null;
+  try {
+    turn = await session.startTurn(prompt, {
+      startup: false,
+      startupSourceLabel: t(config, "effort.shiftSourceLabel"),
+      effort: evaluation.effort,
+      typingIndicator: false,
+    });
+  } catch (error) {
+    const message = error?.stack || String(error);
+    patchState(statePath, state, { last_error: message });
+    appendJsonl(turnRequestLogPath(runtimeDir), {
+      event: "effort_shift_continuation_failed",
+      request_id: evaluation.requestId,
+      thread_id: evaluation.threadId,
+      origin_turn_id: evaluation.originTurnId,
+      effort: evaluation.effort,
+      error: compactOneLine(error?.message || error, 300),
+    });
+    logSystem(`effort shift continuation failed: ${error?.message || error}`);
+    return null;
+  }
+
+  let persisted = false;
+  try {
+    updateConfigEffort({ config, configPath, effort: evaluation.effort });
+    persisted = true;
+  } catch (error) {
+    const message = error?.stack || String(error);
+    patchState(statePath, state, { last_error: message });
+    logSystem(`effort shift persistence failed after turn start: ${error?.message || error}`);
+  }
+
+  unlinkSync(requestPath);
+  appendJsonl(turnRequestLogPath(runtimeDir), {
+    event: "effort_shift_continuation_started",
+    request_id: evaluation.requestId,
+    thread_id: evaluation.threadId,
+    origin_turn_id: evaluation.originTurnId,
+    continuation_turn_id: turn?.turnId ?? null,
+    previous_effort: previousEffort,
+    effort: evaluation.effort,
+    persisted,
+  });
+  logSystem(
+    `effort shift continuation started: ${previousEffort} -> ${evaluation.effort}, turn=${turn?.turnId ?? "(unknown)"}`,
+  );
+  return turn;
+}
+
 async function maybePreemptInputWithProactiveCompaction({
   session,
   config,
@@ -6093,6 +6236,23 @@ async function main() {
       }
 
       state = reloadState();
+      const effortShiftTurn = await maybeRunEffortShiftContinuation({
+        session,
+        config,
+        configPath,
+        state,
+        statePath,
+        runtimeDir,
+      });
+      if (options.once && effortShiftTurn?.done) {
+        await effortShiftTurn.done;
+        return;
+      }
+      if (effortShiftTurn) {
+        continue;
+      }
+
+      state = reloadState();
       const bufferedInputFlushDelayMs = nextBufferedInputFlushDelayMs(pendingMediaGroups, pendingLooseInputs);
       const effectivePollTimeout = bufferedInputFlushDelayMs === null
         ? pollTimeout
@@ -6124,6 +6284,7 @@ async function main() {
             command: "/stop",
             message_id: message.message_id ?? null,
           });
+          clearPendingEffortShiftRequest({ runtimeDir, reason: "manual_stop" });
           state = reloadState();
           session.state = state;
           let pauseResult = { paused: false, goal: null };
@@ -6286,6 +6447,7 @@ async function main() {
             });
             continue;
           }
+          clearPendingEffortShiftRequest({ runtimeDir, reason: "manual_effort" });
           const previousEffort = configuredEffort(config);
           const nextEffort = updateConfigEffort({
             config,

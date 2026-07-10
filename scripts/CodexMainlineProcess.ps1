@@ -28,6 +28,8 @@ function Get-CodexMainlinePaths {
         LaunchLatest = Join-Path $runtimeDir "mainline.launch.latest.json"
         ReadyPath = Join-Path $runtimeDir "mainline.ready.json"
         RestartRequestPath = Join-Path $runtimeDir "mainline.restart.request.json"
+        TurnRequestPath = Join-Path $runtimeDir "turn.request.json"
+        TurnRequestLog = Join-Path $runtimeDir "turn_requests.jsonl"
     }
 }
 

@@ -46,7 +46,9 @@ The result is a three-part decoupling:
   - `/computer`
   - `/stop`
   - `/plan`
+- Optional installable `$effort` skill for model-driven persistent shifts between `high`, `xhigh`, and `max` during sustained work.
 - Context compaction guard:
+  - starts proactive compaction at 90% context usage by default;
   - sends Telegram notices for compaction start/completion/failure/timeout;
   - queues normal messages during compaction;
   - after a failed compaction, sends a short pause turn with `gpt-5.4-mini low` to trigger native recovery;
@@ -234,10 +236,12 @@ Important fields:
 - `startup_autonomy_context_paths`: extra files listed only for autonomous wake startup prompts.
 - `rhythm_*`: optional autonomous wake settings. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
 - `work_budget_*`: long-turn closeout settings.
-- `context_compaction_*`, `compaction_recovery_*`, and `compacting_*`: compaction trigger, pause-turn recovery, and user-visible behavior.
+- `context_compaction_*`, `compaction_recovery_*`, and `compacting_*`: compaction trigger, pause-turn recovery, and user-visible behavior. Proactive compaction defaults to 90% context usage.
 - `compaction_input_queue_path` and `compaction_replay_queue_path`: runtime queues for inputs received during compaction and inputs protected for replay after compaction failure.
 
 See [docs/configuration.md](docs/configuration.md) for details.
+
+See [docs/effort-skill.md](docs/effort-skill.md) to install and use the optional persistent `$effort` skill.
 
 ## Startup Context
 
