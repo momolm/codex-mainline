@@ -31,7 +31,7 @@ The result is a three-part decoupling:
 - Persistent Codex app-server thread saved in `runtime/tg_mainline/state.json`.
 - Telegram private-chat bridge using Bot API long polling.
 - Message forwarding into the same Codex context, including text, captions, photos, image files, static stickers, Telegram files, media groups, and bounded reply/quote context.
-- Assistant replies relayed back to Telegram.
+- Completed assistant replies rendered through Telegram native Rich Message Markdown, with automatic plain-text fallback and no streaming render state.
 - Explicit local file delivery with `<tg_send_file path="..." />`.
 - Bilingual bridge-layer mechanical output: `zh-CN` and `en-US`.
 - Bridge-level slash commands that do not enter model context:

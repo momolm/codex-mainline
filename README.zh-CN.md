@@ -31,7 +31,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 - 持久 Codex app-server thread，保存在 `runtime/tg_mainline/state.json`。
 - 基于 Bot API long polling 的 Telegram 私聊桥接。
 - 把消息转入同一个 Codex 上下文，包括文本、caption、照片、图片文件、静态 sticker、Telegram 文件、媒体组和有边界的回复 / 引用上下文。
-- 将 assistant 回复转发回 Telegram。
+- 完整生成后的 assistant 回复通过 Telegram 原生 Rich Message Markdown 渲染；失败时自动回退纯文本，不维护流式渲染状态。
 - 通过 `<tg_send_file path="..." />` 显式交付本地文件。
 - 桥接层机械输出支持双语：`zh-CN` 和 `en-US`。
 - 不进入模型上下文的桥接层 slash commands：

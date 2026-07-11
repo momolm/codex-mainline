@@ -22,6 +22,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { evaluateEffortShiftRequest } from "./effort-shift-request.mjs";
+import { deliverAssistantText } from "./telegram-reply-delivery.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -30,6 +31,9 @@ const DEFAULT_CONFIG = path.join(
   "config",
   "codex-mainline.settings.json",
 );
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(path.join(WORKSPACE_ROOT, "package.json"), "utf8"),
+).version;
 const DEFAULT_EFFORT = "xhigh";
 
 let TELEGRAM_PROXY_URL = null;
@@ -944,6 +948,46 @@ async function sendText({ token, chatId, text, maxChars, runtimeDir, echo = fals
     });
     if (!echo) logSystem(`TG sent ${index + 1}/${chunks.length}, chars=${chunk.length}`);
   }
+}
+
+async function sendRichMarkdown({ token, chatId, text, runtimeDir }) {
+  const value = String(text || "") || "(empty)";
+  const result = await telegramApi(token, "sendRichMessage", {
+    chat_id: chatId,
+    rich_message: {
+      markdown: value,
+    },
+  });
+  appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+    direction: "send_rich_markdown",
+    message_id: result?.message_id ?? null,
+    chars: value.length,
+  });
+  logSystem(`TG rich Markdown sent, chars=${value.length}`);
+  return result;
+}
+
+async function sendAssistantText({ token, chatId, text, maxChars, runtimeDir, richMarkdown = false }) {
+  return await deliverAssistantText({
+    text,
+    richMarkdown,
+    sendRich: (value) => sendRichMarkdown({ token, chatId, text: value, runtimeDir }),
+    sendPlain: (value) => sendText({
+      token,
+      chatId,
+      text: value,
+      maxChars,
+      runtimeDir,
+      echo: false,
+    }),
+    onRichFallback: (error) => {
+      appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+        direction: "send_rich_markdown_fallback",
+        error: String(error?.message || error).slice(0, 1000),
+      });
+      logSystem(`TG rich Markdown unavailable; falling back to plain text: ${error.message || error}`);
+    },
+  });
 }
 
 async function sendChatAction({ token, chatId, action = "typing", runtimeDir }) {
@@ -3592,7 +3636,7 @@ class MainlineSession {
       onNotification: (message) => this.handleNotification(message),
     });
     await this.rpc.request("initialize", {
-      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: "0.1.8" },
+      clientInfo: { name: "codex-mainline", title: "Codex Mainline", version: PACKAGE_VERSION },
       capabilities: { experimentalApi: true, optOutNotificationMethods: [] },
     });
     logSystem("app-server websocket connected");
@@ -4552,16 +4596,16 @@ class MainlineSession {
     this.relayToTelegram(compactingTimedOutNotice(this.config, nextCompactionRecoveryStep(this.state, this.config)));
   }
 
-  relayToTelegram(text) {
+  relayToTelegram(text, { richMarkdown = false } = {}) {
     const value = String(text ?? "");
     if (!value.trim()) return;
-    const relay = this.telegramRelayQueue.then(() => sendText({
+    const relay = this.telegramRelayQueue.then(() => sendAssistantText({
       token: this.token,
       chatId: this.chatId,
       text: value,
       maxChars: this.maxChars,
       runtimeDir: this.runtimeDir,
-      echo: false,
+      richMarkdown,
     })).catch((error) => {
       patchState(this.statePath, this.state, { last_error: error.stack || String(error) });
       logSystem(`TG relay failed: ${error.message || error}`);
@@ -4631,7 +4675,7 @@ class MainlineSession {
     if (!visibleText.trim() && files.length === 0) return;
     this.sentAssistantItems.add(key);
     this.closeRunDetailSegment();
-    if (visibleText.trim()) this.relayToTelegram(visibleText);
+    if (visibleText.trim()) this.relayToTelegram(visibleText, { richMarkdown: true });
     for (const filePath of files) {
       this.relayDeliveryFile(filePath);
     }

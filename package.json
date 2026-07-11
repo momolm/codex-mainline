@@ -1,6 +1,6 @@
 {
   "name": "codex-mainline",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": false,
   "type": "module",
   "license": "MIT",
@@ -11,7 +11,7 @@
     "start": "node src/start-codex-mainline.mjs",
     "dry-run": "node src/start-codex-mainline.mjs --dry-run",
     "check": "node --check src/start-codex-mainline.mjs",
-    "test": "node --test src/effort-shift-request.test.mjs"
+    "test": "node --test src/*.test.mjs"
   },
   "engines": {
     "node": ">=22"

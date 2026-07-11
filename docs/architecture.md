@@ -45,5 +45,11 @@ Codex Mainline connects these parts without requiring the Telegram UI, Codex run
 3. Slash commands are handled by the bridge when possible.
 4. Normal messages are converted into Codex input, including pulse metadata and any downloaded images.
 5. The app-server turn streams items back to the bridge.
-6. Assistant text is relayed to Telegram; tool details are summarized in compact runtime blocks.
+6. A completed assistant reply is sent once through Telegram native Rich Message Markdown. Rejected rich markup falls back to the existing plain-text splitter; tool details remain compact runtime blocks.
 7. Runtime evidence is written under `runtime/tg_mainline/`.
+
+## Telegram Markdown Lifecycle
+
+Markdown rendering stays outside the Node.js process. The bridge forwards one completed assistant string to Telegram Bot API `sendRichMessage` and retains no parsed document, render tree, incremental token buffer, or message-history cache. The request-local string and callbacks become collectible when delivery settles.
+
+System notices, tool-detail cards, and file delivery retain their existing paths. Telegram streaming remains disabled. This keeps rendering work bounded to one finalized reply and prevents the bridge from repeatedly parsing or accumulating historical Markdown.
