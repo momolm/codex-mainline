@@ -15,6 +15,9 @@ It is not a reverse proxy. It does not emulate a model API or scrape an app UI. 
 - I18n catalog: loads bridge-layer mechanical output from `locales/<locale>.json`.
 - Runtime logs: compact JSONL diagnostics, not documentation or source of truth.
 - File delivery: extracts `<tg_send_file path="..." />`, validates local paths, and sends Telegram photos/documents.
+- Run-detail renderer: keeps one live tail block, freezes completed continuation blocks, and stays within the exact Telegram HTML message boundary.
+- Tool-output preview: captures a bounded stream window and renders head-tail completion previews without retaining unbounded command output in memory.
+- MCP runtime control: lists or hot-reloads the MCP inventory for the currently bound Codex thread through native app-server RPCs.
 - Compaction guard: watches context usage, starts compaction, queues input, sends pause-turn recovery after failure/timeout, and resumes work after recovery.
 - Turn request channel: accepts one explicit request bound to the active thread and origin turn; the current action persists a validated effort and starts one same-thread continuation.
 - PowerShell process layer: starts/stops the Node runner and supervises it with a watchdog on Windows.
@@ -45,8 +48,13 @@ Codex Mainline connects these parts without requiring the Telegram UI, Codex run
 3. Slash commands are handled by the bridge when possible.
 4. Normal messages are converted into Codex input, including pulse metadata and any downloaded images.
 5. The app-server turn streams items back to the bridge.
-6. A completed assistant reply is sent once through Telegram native Rich Message Markdown. Rejected rich markup falls back to the existing plain-text splitter; tool details remain compact runtime blocks.
-7. Runtime evidence is written under `runtime/tg_mainline/`.
+6. Tool events update compact run-detail blocks. Full blocks become stable continuations, while the last block remains live; large output previews keep a bounded head and tail.
+7. A completed assistant reply is sent once through Telegram native Rich Message Markdown. Rejected rich markup falls back to the existing plain-text splitter.
+8. Runtime evidence is written under `runtime/tg_mainline/`.
+
+## MCP Hot Reload
+
+The `/mcp` command family is a bridge protocol surface. Status reads `mcpServerStatus/list` with pagination for the current thread. Reload first calls `config/mcpServer/reload`, then rereads the same inventory. App-server startup notifications provide per-server progress or failure evidence without introducing a second MCP state machine in the bridge.
 
 ## Telegram Markdown Lifecycle
 

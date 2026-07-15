@@ -22,7 +22,26 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { evaluateEffortShiftRequest } from "./effort-shift-request.mjs";
+import {
+  formatMcpRuntimeStatus,
+  listMcpServerInventory,
+  mcpUsageNotice,
+  parseMcpCommand,
+  reloadMcpServerInventory,
+} from "./mcp-runtime-control.mjs";
 import { deliverAssistantText } from "./telegram-reply-delivery.mjs";
+import {
+  TELEGRAM_SAFE_MESSAGE_CHARS,
+  renderRunDetailBlocks,
+} from "./telegram-run-detail-blocks.mjs";
+import {
+  DEFAULT_TOOL_OUTPUT_PREVIEW_CHARS,
+  capturedToolOutputLiveHead,
+  captureToolOutput,
+  createToolOutputCapture,
+  formatCapturedToolOutputPreview,
+  formatToolOutputPreview,
+} from "./telegram-tool-output-preview.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -1019,32 +1038,10 @@ function htmlEscape(value) {
     .replaceAll('"', "&quot;");
 }
 
-function splitTextForTelegram(value, maxChars) {
-  const chunks = [];
-  let remaining = String(value || "");
-  while (remaining.length > maxChars) {
-    let splitAt = remaining.lastIndexOf("\n", maxChars);
-    if (splitAt < Math.floor(maxChars * 0.5)) splitAt = maxChars;
-    chunks.push(remaining.slice(0, splitAt).trimEnd());
-    remaining = remaining.slice(splitAt).replace(/^\n+/, "");
-  }
-  chunks.push(remaining.trimEnd() || "(empty)");
-  return chunks;
-}
-
 function compactOneLine(value, maxChars = 220) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (text.length <= maxChars) return text;
   return `${text.slice(0, Math.max(0, maxChars - 15)).trimEnd()} ...[truncated]`;
-}
-
-function formatRunDetailBlock(config, chunk, index, total, done = false) {
-  const suffix = index > 0 ? t(config, "runDetails.blockSuffix", { index: index + 1 }) : "";
-  const state = done ? t(config, "runDetails.done") : t(config, "runDetails.live");
-  return [
-    `<b>${htmlEscape(t(config, "runDetails.title", { suffix, state }))}</b>`,
-    `<blockquote expandable>${htmlEscape(chunk)}</blockquote>`,
-  ].join("\n");
 }
 
 async function sendFormattedText({ token, chatId, text, parseMode, runtimeDir }) {
@@ -3119,6 +3116,10 @@ function historyUsageNotice(config) {
   return t(config, "history.usage");
 }
 
+function mcpTranslator(config) {
+  return (key, params = {}) => t(config, `mcp.${key}`, params, key);
+}
+
 function threadTitle(config, thread) {
   const name = String(thread?.name || "").trim();
   if (name) return name;
@@ -3614,10 +3615,12 @@ class MainlineSession {
     this.runDetailStarted = false;
     this.runDetailToolStates = new Map();
     this.runDetailLatest = null;
+    this.mcpServerStartupStatuses = new Map();
     this.activeCommandId = null;
     this.commandCounter = 0;
     this.commandNumbers = new Map();
     this.commandOutputSeen = new Set();
+    this.commandOutputStats = new Map();
     this.currentTurnDone = null;
     this.currentTurnDoneResolve = null;
     this.currentTurnDoneTypingAttached = false;
@@ -3704,6 +3707,33 @@ class MainlineSession {
       limit,
       sortKey: "updated_at",
       archived: false,
+    });
+  }
+
+  mcpServerStartupStatusSnapshot(threadId = this.state.thread_id ?? null) {
+    return [...this.mcpServerStartupStatuses.values()].filter((item) => (
+      item.threadId === null || threadId === null || item.threadId === threadId
+    ));
+  }
+
+  async listMcpServers() {
+    await this.ensureConnected();
+    const threadId = this.state.thread_id ?? null;
+    if (threadId) await this.verifyThreadCanResume(threadId);
+    return await listMcpServerInventory({
+      request: (method, params) => this.rpc.request(method, params),
+      threadId,
+    });
+  }
+
+  async reloadMcpServers() {
+    await this.ensureConnected();
+    const threadId = this.state.thread_id ?? null;
+    if (threadId) await this.verifyThreadCanResume(threadId);
+    this.mcpServerStartupStatuses.clear();
+    return await reloadMcpServerInventory({
+      request: (method, params) => this.rpc.request(method, params),
+      threadId,
     });
   }
 
@@ -4181,14 +4211,23 @@ class MainlineSession {
     this.runDetailLatest = `${failed ? "failed" : "completed"} ${compactLabel}`;
   }
 
-  runDetailSummaryText({ final = this.runDetailFinal, toolStates = this.runDetailToolStates, latest = this.runDetailLatest } = {}) {
+  runDetailSummaryText({ final = this.runDetailFinal, latest = this.runDetailLatest } = {}) {
     const lines = [
-      `turn: ${this.currentTurnId ?? "(unknown)"}`,
+      `turn: ${compactOneLine(this.currentTurnId ?? "(unknown)", 64)}`,
       t(this.config, "runDetails.status", { state: final ? t(this.config, "runDetails.done") : t(this.config, "runDetails.live") }),
     ];
     if (latest) lines.push(t(this.config, "runDetails.latest", { latest }));
     lines.push(t(this.config, "runDetails.expandHint"));
     return lines.join("\n");
+  }
+
+  runDetailSummaryReserveText({ final = this.runDetailFinal } = {}) {
+    return [
+      `turn: ${"&".repeat(64)}`,
+      t(this.config, "runDetails.status", { state: final ? t(this.config, "runDetails.done") : t(this.config, "runDetails.live") }),
+      t(this.config, "runDetails.latest", { latest: "&".repeat(183) }),
+      t(this.config, "runDetails.expandHint"),
+    ].join("\n");
   }
 
   scheduleRunDetailFlush(delayMs = 6000) {
@@ -4197,27 +4236,6 @@ class MainlineSession {
       this.runDetailFlushTimer = null;
       this.flushRunDetails(false);
     }, delayMs);
-  }
-
-  runDetailTextForTelegram({
-    text = this.runDetailText,
-    final = this.runDetailFinal,
-    toolStates = this.runDetailToolStates,
-    latest = this.runDetailLatest,
-  } = {}) {
-    const maxChars = Math.max(1200, Math.trunc(numberFromConfig(this.config, "run_detail_max_chars", 2600)));
-    const summary = this.runDetailSummaryText({ final, toolStates, latest });
-    const fullText = `${summary}\n\n---\n\n${text}`;
-    if (fullText.length <= maxChars) return fullText;
-    const headChars = Math.trunc(maxChars * 0.65);
-    const tailChars = Math.max(300, maxChars - headChars);
-    return [
-      fullText.slice(0, headChars).trimEnd(),
-      "",
-      t(this.config, "runDetails.truncated", { path: path.join(this.runtimeDir, "events*.jsonl") }),
-      "",
-      fullText.slice(-tailChars).trimStart(),
-    ].join("\n");
   }
 
   flushRunDetails(final = false) {
@@ -4235,23 +4253,26 @@ class MainlineSession {
     this.runDetailFlushInFlight = true;
     const segmentText = this.runDetailText;
     const segmentFinal = this.runDetailFinal;
-    const segmentToolStates = new Map(this.runDetailToolStates);
     const segmentLatest = this.runDetailLatest;
     const segmentMessageIds = this.runDetailMessageIds;
     const segmentRendered = this.runDetailRendered;
-    const chunkSize = Math.max(1000, Math.min(3300, this.maxChars - 600));
-    const rawChunks = splitTextForTelegram(
-      this.runDetailTextForTelegram({
-        text: segmentText,
+    const title = ({ index, total, state }) => {
+      const suffix = total > 1 ? t(this.config, "runDetails.blockSuffix", { index: index + 1 }) : "";
+      const stateText = state === "continued"
+        ? t(this.config, "runDetails.continued")
+        : t(this.config, `runDetails.${state}`);
+      return t(this.config, "runDetails.title", { suffix, state: stateText });
+    };
+    const renderedChunks = renderRunDetailBlocks(segmentText, {
+      maxChars: this.maxChars,
+      done: segmentFinal,
+      summary: this.runDetailSummaryText({
         final: segmentFinal,
-        toolStates: segmentToolStates,
         latest: segmentLatest,
       }),
-      chunkSize,
-    );
-    const renderedChunks = rawChunks.map((chunk, index) => (
-      formatRunDetailBlock(this.config, chunk, index, rawChunks.length, segmentFinal)
-    ));
+      summaryReserve: this.runDetailSummaryReserveText({ final: segmentFinal }),
+      title,
+    });
 
     const relay = this.telegramRelayQueue.then(async () => {
       for (let index = 0; index < renderedChunks.length; index += 1) {
@@ -4330,28 +4351,88 @@ class MainlineSession {
     if (!value) return;
     const key = String(itemId || this.activeCommandId || "command");
     this.ensureRunDetailsStarted(t(this.config, "runDetails.toolOutput"));
-    const stat = this.commandOutputStats.get(key) ?? { chars: 0, previewChars: 0, truncated: false };
-    stat.chars += value.length;
-    const previewLimit = Math.max(0, Math.trunc(numberFromConfig(this.config, "run_detail_output_preview_chars", 260)));
-    const remainingPreview = Math.max(0, previewLimit - stat.previewChars);
-    if (!this.commandOutputSeen.has(key)) {
+    const previewLimit = Math.max(1, Math.trunc(numberFromConfig(
+      this.config,
+      "run_detail_output_preview_chars",
+      DEFAULT_TOOL_OUTPUT_PREVIEW_CHARS,
+    )));
+    const stat = this.commandOutputStats.get(key) ?? {
+      capture: createToolOutputCapture(),
+      displayedHead: "",
+      previewStarted: false,
+      finalized: false,
+      chars: 0,
+    };
+    stat.capture = captureToolOutput(stat.capture, value, previewLimit);
+    stat.chars = stat.capture.totalChars;
+    const liveHead = capturedToolOutputLiveHead(stat.capture, previewLimit);
+    if (!stat.previewStarted && liveHead) {
+      stat.previewStarted = true;
       this.commandOutputSeen.add(key);
       const number = this.commandNumbers.get(key);
-      this.appendRunDetail(`${number ? `tool #${number} ` : ""}output preview:`);
+      this.appendRunDetail(t(this.config, "runDetails.outputPreview", {
+        prefix: number ? `tool #${number} ` : "",
+      }));
     }
-    if (remainingPreview > 0) {
-      const preview = value.slice(0, remainingPreview);
-      stat.previewChars += preview.length;
-      this.appendRunDetailRaw(`\n${preview}`);
-      if (value.length > remainingPreview && !stat.truncated) {
-        stat.truncated = true;
-        this.appendRunDetailRaw("\n...[output truncated in TG; full output is in runtime events]");
+    if (liveHead.startsWith(stat.displayedHead)) {
+      const addition = liveHead.slice(stat.displayedHead.length);
+      if (addition) {
+        this.appendRunDetailRaw(`${stat.displayedHead ? "" : "\n"}${addition}`);
+        stat.displayedHead = liveHead;
       }
-    } else if (!stat.truncated) {
-      stat.truncated = true;
-      this.appendRunDetailRaw("\n...[output truncated in TG; full output is in runtime events]");
     }
     this.commandOutputStats.set(key, stat);
+  }
+
+  finalizeCommandOutput(itemId, aggregatedOutput = null) {
+    const key = String(itemId || this.activeCommandId || "command");
+    const previewLimit = Math.max(1, Math.trunc(numberFromConfig(
+      this.config,
+      "run_detail_output_preview_chars",
+      DEFAULT_TOOL_OUTPUT_PREVIEW_CHARS,
+    )));
+    const existingStat = this.commandOutputStats.get(key);
+    const hasAggregatedOutput = Boolean(
+      typeof aggregatedOutput === "string" && aggregatedOutput.trim(),
+    );
+    if (!existingStat && !hasAggregatedOutput) return null;
+
+    const stat = existingStat ?? {
+      capture: createToolOutputCapture(),
+      displayedHead: "",
+      previewStarted: false,
+      finalized: false,
+      chars: 0,
+    };
+    if (stat.finalized) return stat;
+
+    const omissionMarker = (chars) => t(this.config, "runDetails.outputOmitted", { chars });
+    const result = hasAggregatedOutput
+      ? formatToolOutputPreview(aggregatedOutput, previewLimit, { omissionMarker })
+      : formatCapturedToolOutputPreview(stat.capture, previewLimit, { omissionMarker });
+    stat.chars = stat.capture.totalChars || result.totalChars;
+    stat.truncated = result.truncated;
+
+    if (result.preview) {
+      const number = this.commandNumbers.get(key);
+      if (!stat.previewStarted) {
+        stat.previewStarted = true;
+        this.commandOutputSeen.add(key);
+        this.appendRunDetail(t(this.config, "runDetails.outputPreview", {
+          prefix: number ? `tool #${number} ` : "",
+        }));
+        this.appendRunDetailRaw(`\n${result.preview}`);
+      } else if (result.preview.startsWith(stat.displayedHead)) {
+        const addition = result.preview.slice(stat.displayedHead.length);
+        if (addition) this.appendRunDetailRaw(addition);
+      } else {
+        this.appendRunDetailRaw(`\n${t(this.config, "runDetails.completedOutputPreview")}\n${result.preview}`);
+      }
+    }
+
+    stat.finalized = true;
+    this.commandOutputStats.set(key, stat);
+    return stat;
   }
 
   appendGenericToolStart(item) {
@@ -4370,6 +4451,7 @@ class MainlineSession {
   appendGenericToolCompletion(item) {
     const id = item?.id ?? `${item?.type || "tool"}-${this.commandCounter + 1}`;
     const number = this.commandNumber(id);
+    this.finalizeCommandOutput(id);
     this.ensureRunDetailsStarted(t(this.config, "runDetails.toolDone"));
     this.noteRunDetailToolCompleted(
       id,
@@ -4714,6 +4796,23 @@ class MainlineSession {
   }
 
   handleNotification(message) {
+    if (message.method === "mcpServer/startupStatus/updated") {
+      const item = message.params ?? {};
+      const name = String(item.name ?? "").trim();
+      if (name) {
+        const threadId = item.threadId ?? null;
+        this.mcpServerStartupStatuses.set(`${threadId ?? "*"}\0${name}`, {
+          name,
+          threadId,
+          status: item.status ?? null,
+          error: item.error ?? item.failureReason ?? null,
+          updatedAt: iso(),
+        });
+        logSystem(`MCP startup status: ${name}=${item.status ?? "(unknown)"}`);
+      }
+      return;
+    }
+
     if (message.method === "thread/tokenUsage/updated") {
       const snapshot = contextUsageSnapshotFromParams(message.params, iso());
       if (snapshot) {
@@ -4808,11 +4907,8 @@ class MainlineSession {
       logSystem(`tool completed: status=${item.status ?? "(unknown)"}, exit=${item.exitCode ?? "(unknown)"}`);
       const key = String(item.id || this.activeCommandId || "command");
       const number = this.commandNumber(key);
-      if (item.aggregatedOutput && !this.commandOutputSeen.has(key)) {
-        this.appendCommandOutput(key, item.aggregatedOutput);
-      }
+      const outputStat = this.finalizeCommandOutput(key, item.aggregatedOutput);
       this.ensureRunDetailsStarted(t(this.config, "runDetails.toolDone"));
-      const outputStat = this.commandOutputStats.get(key);
       this.noteRunDetailToolCompleted(
         key,
         `tool #${number} status=${item.status ?? "(unknown)"} exit=${item.exitCode ?? "(unknown)"}`,
@@ -5967,7 +6063,7 @@ async function main() {
   let state = loadState(statePath);
   writeJson(statePath, state);
 
-  const maxChars = Math.trunc(numberFromConfig(config, "max_message_chars", 3500));
+  const maxChars = Math.trunc(numberFromConfig(config, "max_message_chars", TELEGRAM_SAFE_MESSAGE_CHARS));
   const pollTimeout = Math.trunc(numberFromConfig(config, "poll_timeout_seconds", 25));
   const idleSleep = numberFromConfig(config, "idle_sleep_seconds", 2);
 
@@ -6658,6 +6754,66 @@ async function main() {
               text: unsupported
                 ? t(config, "history.unsupported")
                 : t(config, "history.failed", { error: messageText.slice(0, 300) }),
+              maxChars,
+              runtimeDir,
+              echo: true,
+            });
+          }
+          continue;
+        }
+        const mcpCommand = parseMcpCommand(slashText);
+        if (mcpCommand) {
+          logBlock(t(config, "log.userToBridge"), slashText);
+          appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+            direction: "recv_command",
+            command: "/mcp",
+            action: mcpCommand.action,
+            message_id: message.message_id ?? null,
+          });
+          const translate = mcpTranslator(config);
+          if (mcpCommand.action === "invalid") {
+            await sendText({
+              token: secrets.token,
+              chatId: secrets.allowedChatId,
+              text: mcpUsageNotice(translate),
+              maxChars,
+              runtimeDir,
+              echo: true,
+            });
+            continue;
+          }
+          try {
+            const reloaded = mcpCommand.action === "reload";
+            const result = reloaded
+              ? await session.reloadMcpServers()
+              : await session.listMcpServers();
+            await sendText({
+              token: secrets.token,
+              chatId: secrets.allowedChatId,
+              text: formatMcpRuntimeStatus(result, {
+                reloaded,
+                threadId: result.threadId,
+                startupStatuses: session.mcpServerStartupStatusSnapshot(result.threadId),
+                translate,
+              }),
+              maxChars,
+              runtimeDir,
+              echo: true,
+            });
+          } catch (error) {
+            const messageText = String(error?.message || error);
+            patchState(statePath, state, { last_error: error.stack || String(error) });
+            await sendText({
+              token: secrets.token,
+              chatId: secrets.allowedChatId,
+              text: [
+                t(config, "mcp.failed", {
+                  action: t(config, `mcp.action${mcpCommand.action === "reload" ? "Reload" : "Status"}`),
+                  error: messageText.slice(0, 300),
+                }),
+                "",
+                mcpUsageNotice(translate),
+              ].join("\n"),
               maxChars,
               runtimeDir,
               echo: true,

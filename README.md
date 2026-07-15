@@ -32,6 +32,7 @@ The result is a three-part decoupling:
 - Telegram private-chat bridge using Bot API long polling.
 - Message forwarding into the same Codex context, including text, captions, photos, image files, static stickers, Telegram files, media groups, and bounded reply/quote context.
 - Completed assistant replies rendered through Telegram native Rich Message Markdown, with automatic plain-text fallback and no streaming render state.
+- Live tool details continue across stable Telegram blocks at the platform-safe 4000-character boundary, while bounded head-tail previews keep both the start and outcome of large outputs visible.
 - Explicit local file delivery with `<tg_send_file path="..." />`.
 - Bilingual bridge-layer mechanical output: `zh-CN` and `en-US`.
 - Bridge-level slash commands that do not enter model context:
@@ -42,6 +43,7 @@ The result is a three-part decoupling:
   - `/rhythm`
   - `/session`
   - `/history`
+  - `/mcp`
   - `/goal`
   - `/computer`
   - `/stop`
@@ -232,6 +234,8 @@ Important fields:
 - `state_path`: persisted bridge state.
 - `runtime_dir`: local-only logs, attachments, generated images, sidecars, locks, and ready files.
 - `bot_commands`: Telegram slash menu registered at startup.
+- `max_message_chars`: safe Telegram text boundary; the committed default is `4000`.
+- `run_detail_output_preview_chars`: bounded head-tail preview size for each completed tool output.
 - `startup_context_paths`: files included in the first startup prompt.
 - `startup_autonomy_context_paths`: extra files listed only for autonomous wake startup prompts.
 - `rhythm_*`: optional autonomous wake settings. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
@@ -273,6 +277,7 @@ The bridge removes the marker from visible text, validates the path, and sends i
 
 ## Documentation
 
+- [CHANGELOG.md](CHANGELOG.md)
 - [docs/installation.md](docs/installation.md)
 - [docs/configuration.md](docs/configuration.md)
 - [docs/architecture.md](docs/architecture.md)

@@ -32,6 +32,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 - 基于 Bot API long polling 的 Telegram 私聊桥接。
 - 把消息转入同一个 Codex 上下文，包括文本、caption、照片、图片文件、静态 sticker、Telegram 文件、媒体组和有边界的回复 / 引用上下文。
 - 完整生成后的 assistant 回复通过 Telegram 原生 Rich Message Markdown 渲染；失败时自动回退纯文本，不维护流式渲染状态。
+- 实时工具细节按 Telegram 安全的 4000 字符边界稳定续块；有界头尾预览同时保留大段输出的开头与结果。
 - 通过 `<tg_send_file path="..." />` 显式交付本地文件。
 - 桥接层机械输出支持双语：`zh-CN` 和 `en-US`。
 - 不进入模型上下文的桥接层 slash commands：
@@ -42,6 +43,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
   - `/rhythm`
   - `/session`
   - `/history`
+  - `/mcp`
   - `/goal`
   - `/computer`
   - `/stop`
@@ -223,6 +225,8 @@ PowerShell 脚本在 `scripts/` 下：
 - `state_path`：持久桥接状态。
 - `runtime_dir`：仅本地使用的日志、附件、生成图片、sidecar、lock 和 ready 文件目录。
 - `bot_commands`：启动时注册到 Telegram 的 slash menu。
+- `max_message_chars`：Telegram 文本安全边界；提交的默认值为 `4000`。
+- `run_detail_output_preview_chars`：每项完成态工具输出的有界头尾预览大小。
 - `startup_context_paths`：首个启动 prompt 中列出的文件。
 - `startup_autonomy_context_paths`：只在自主唤醒启动 prompt 中额外列出的文件。
 - `rhythm_*`：可选自主唤醒设置。`rhythm_enabled` 默认是 `false`；需要时用 `/rhythm on` 或配置显式开启。
@@ -264,6 +268,7 @@ PowerShell 脚本在 `scripts/` 下：
 
 ## 文档
 
+- [CHANGELOG.md](CHANGELOG.md)
 - [docs/installation.md](docs/installation.md)
 - [docs/configuration.md](docs/configuration.md)
 - [docs/architecture.md](docs/architecture.md)

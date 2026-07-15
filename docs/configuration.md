@@ -57,6 +57,8 @@ Local file shape:
 - `state_path`: bridge state file.
 - `runtime_dir`: local-only runtime evidence directory.
 - `bot_commands`: slash commands registered with Telegram.
+- `max_message_chars`: safe upper boundary for Telegram text blocks. The committed default is `4000`, leaving room below Telegram's 4096-character hard limit.
+- `run_detail_output_preview_chars`: target size for a completed tool output preview. Large outputs retain a bounded head and tail with an omission marker; raw runtime evidence remains in `runtime_dir`.
 - `startup_context_paths`: files listed in the startup prompt.
 - `startup_autonomy_context_paths`: extra files listed only in autonomous wake startup prompts.
 - `rhythm_enabled`, `rhythm_interval_seconds`, `rhythm_message_path`: optional wake loop. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
@@ -68,6 +70,10 @@ Local file shape:
 - `proactive_compaction_resume_prompt`: prompt sent after proactive compaction succeeds when no queued user input is waiting.
 - `compaction_input_queue_path`, `compaction_replay_queue_path`: optional overrides for queued Telegram input and protected replay input paths. Defaults live under `runtime_dir`.
 - `server_overloaded_continue_prompt`: optional override for the continuation prompt sent after an OpenAI `serverOverloaded` turn failure.
+
+## MCP Runtime Control
+
+`/mcp` reports the MCP servers, tools, authentication state, and startup state visible to the currently bound Codex thread. `/mcp reload` asks app-server to reread MCP configuration from disk, refreshes the current thread, and returns the resulting inventory. Both commands stay in the bridge layer and do not enter model context.
 
 ## Persistent Effort Shift
 
