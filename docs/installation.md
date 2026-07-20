@@ -36,6 +36,12 @@ codex doctor --summary
 
 Codex desktop app is optional. It is useful for inspection and troubleshooting, but Codex Mainline runs through Codex CLI and `codex app-server`.
 
+Python 3 and Pillow are optional. Install them only when you want the visual sticker shelf to render preview atlases:
+
+```powershell
+python -m pip install Pillow
+```
+
 ## 2. Clone The Repository
 
 ```powershell
@@ -116,6 +122,8 @@ codex app-server --listen ws://127.0.0.1:48751
 ```
 
 Stop it with `Ctrl+C` after the check. The bridge can start it automatically during normal operation.
+
+The optional asynchronous contact bot has its own setup and launcher. See [companion-inbox.md](companion-inbox.md).
 
 ## 6. Start
 
@@ -226,6 +234,12 @@ codex doctor --summary
 
 Codex App 是可选项。它适合查看 session 和排查登录状态，但 Codex Mainline 真正依赖的是 Codex CLI 和 `codex app-server`。
 
+Python 3 和 Pillow 也是可选项，仅在视觉贴纸书架需要生成预览图册时安装：
+
+```powershell
+python -m pip install Pillow
+```
+
 ## 2. 克隆仓库
 
 ```powershell
@@ -301,6 +315,8 @@ npm start
 ```text
 Start-CodexMainlineWatchdog.bat
 ```
+
+可选异步联系 bot 具备独立配置与启动入口，详见 [companion-inbox.md](companion-inbox.md)。
 
 可选：安装开机自启：
 

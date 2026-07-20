@@ -8,7 +8,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 
 这个仓库只包含通用桥接代码。不包含凭据、运行日志、聊天历史、本地路径或项目私有资料。
 
-当前状态：公开桥接版本，支持双语桥接输出、watchdog 生命周期脚本、图片和文件输入，以及上下文压缩恢复。
+当前状态：公开桥接版本，支持双语输出、watchdog 生命周期脚本、丰富 Telegram 输入、视觉贴纸交付、上下文压缩恢复、静默 turn 恢复，以及可选的异步联系收件箱。
 
 ## 为什么需要它
 
@@ -31,9 +31,12 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 - 持久 Codex app-server thread，保存在 `runtime/tg_mainline/state.json`。
 - 基于 Bot API long polling 的 Telegram 私聊桥接。
 - 把消息转入同一个 Codex 上下文，包括文本、caption、照片、图片文件、静态 sticker、Telegram 文件、媒体组和有边界的回复 / 引用上下文。
+- 使用短滑动收集窗合并相邻普通 update；单条消息保持自然原貌。
 - 完整生成后的 assistant 回复通过 Telegram 原生 Rich Message Markdown 渲染；失败时自动回退纯文本，不维护流式渲染状态。
 - 实时工具细节按 Telegram 安全的 4000 字符边界稳定续块；有界头尾预览同时保留大段输出的开头与结果。
 - 通过 `<tg_send_file path="..." />` 显式交付本地文件。
+- 共享视觉贴纸书架实时刷新贴纸包，并通过稳定的 `file_unique_id` 和 `<tg_send_sticker ... />` 交付贴纸。
+- 可选的异步联系收件箱 bot；消息持久保存，同时继续由同一条 Codex thread 承接注意力。
 - 桥接层机械输出支持双语：`zh-CN` 和 `en-US`。
 - 不进入模型上下文的桥接层 slash commands：
   - `/status`
@@ -55,6 +58,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
   - 压缩期间对普通消息排队；
   - 压缩失败后使用 `gpt-5.4-mini low` 发送短暂停 turn，以触发原生压缩恢复；
   - 失败链路之后如果压缩恢复成功，会注入继续任务的恢复提示。
+- 静默 turn 保护：模型事件流停止后自动恢复；活跃推理与工具工作会暂停静默计时。
 - 面向长期本地运行的 watchdog 监督。
 - 可选的自主跟进节律唤醒消息。
 - 面向长 active turn 的工作预算提醒。
@@ -78,6 +82,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 - Codex 桌面应用。它适合检查登录 / session 和本地排障，但桥接器不依赖它运行。
 - Telegram HTTP proxy，用于 Telegram Bot API 在你的网络中不可直连的情况。
 - 浏览器 / computer-use 工具，用于主机 UI 自动化。
+- Python 3 和 Pillow，仅用于生成视觉贴纸预览图册。
 
 默认情况下，桥接器会自行启动 app-server：
 
@@ -162,9 +167,10 @@ Stop-CodexMainlineAndWatchdog.bat
 
 ## Windows 入口
 
-仓库根目录只暴露两个可双击入口：
+仓库根目录提供三个可双击入口：
 
 - `Start-CodexMainlineWatchdog.bat`：启动 watchdog，并由 watchdog 监督 mainline。
+- `Start-CodexCompanionInbox.bat`：启动可选的异步联系收件箱。
 - `Stop-CodexMainlineAndWatchdog.bat`：同时停止 mainline 和 watchdog。
 
 PowerShell 脚本在 `scripts/` 下：
@@ -172,6 +178,7 @@ PowerShell 脚本在 `scripts/` 下：
 - `scripts/Start-CodexMainline.ps1`
 - `scripts/Stop-CodexMainline.ps1`
 - `scripts/Start-CodexMainlineWatchdog.ps1`
+- `scripts/Start-CodexCompanionInbox.ps1`
 - `scripts/Watch-CodexMainline.ps1`
 
 ## 语言
@@ -227,6 +234,10 @@ PowerShell 脚本在 `scripts/` 下：
 - `bot_commands`：启动时注册到 Telegram 的 slash menu。
 - `max_message_chars`：Telegram 文本安全边界；提交的默认值为 `4000`。
 - `run_detail_output_preview_chars`：每项完成态工具输出的有界头尾预览大小。
+- `input_collect_seconds`、`loose_media_collect_seconds`、`rapid_empty_poll_backoff_seconds`：相邻输入收集与 Telegram polling 延迟控制。
+- `turn_stall_timeout_seconds`：静默 active turn 的恢复阈值；活跃推理与工具 item 会暂停检测。
+- `sticker_catalog_path`、`sticker_cache_dir`、`max_sticker_preview_count`：共享视觉贴纸书架的存储位置与预览上限。
+- `companion_inbox_*`：可选异步联系收件箱的通知接入设置。
 - `startup_context_paths`：首个启动 prompt 中列出的文件。
 - `startup_autonomy_context_paths`：只在自主唤醒启动 prompt 中额外列出的文件。
 - `rhythm_*`：可选自主唤醒设置。`rhythm_enabled` 默认是 `false`；需要时用 `/rhythm on` 或配置显式开启。
@@ -256,6 +267,12 @@ PowerShell 脚本在 `scripts/` 下：
 
 桥接器会从可见文本中移除该标记，校验路径，并把图片作为 photo、其他文件通过 Telegram 文件上传发送。`config/` 和 `runtime/` 下的文件禁止交付。
 
+视觉贴纸交付使用从当前贴纸书架中选定的稳定身份：
+
+```xml
+<tg_send_sticker set="set_name" file_unique_id="stable_file_unique_id" />
+```
+
 ## 边界
 
 - Codex Mainline 是围绕官方 Codex CLI app-server 的本地桥接器，不是托管服务。
@@ -275,3 +292,4 @@ PowerShell 脚本在 `scripts/` 下：
 - [docs/i18n.md](docs/i18n.md)
 - [docs/codex-field-inheritance.md](docs/codex-field-inheritance.md)
 - [docs/security.md](docs/security.md)
+- [docs/companion-inbox.md](docs/companion-inbox.md)

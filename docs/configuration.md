@@ -59,6 +59,13 @@ Local file shape:
 - `bot_commands`: slash commands registered with Telegram.
 - `max_message_chars`: safe upper boundary for Telegram text blocks. The committed default is `4000`, leaving room below Telegram's 4096-character hard limit.
 - `run_detail_output_preview_chars`: target size for a completed tool output preview. Large outputs retain a bounded head and tail with an omission marker; raw runtime evidence remains in `runtime_dir`.
+- `input_collect_seconds`: sliding collection window for adjacent ordinary Telegram updates. The default is `1`; one message stays unwrapped, while multiple messages become one ordered input.
+- `loose_media_collect_seconds`: additional collection time for media that Telegram delivers as separate updates without a media-group identifier.
+- `rapid_empty_poll_backoff_seconds`: short backoff after an empty `getUpdates` response. It avoids an extra full polling interval while retaining bounded retry behavior.
+- `turn_stall_timeout_seconds`: quiet-period threshold for recovering an active turn whose app-server event stream has stopped. Active reasoning, command, tool, web, image-generation, file-change, collaboration, and compaction items suspend the detector. Each turn receives at most one automatic recovery attempt.
+- `turn_stall_recovery_notice`, `turn_stall_recovery_prompt`, `turn_stall_input_prompt`, `turn_stall_recovery_failed_notice`: locale-keyed user notice and continuation text for silent-turn recovery.
+- `sticker_catalog_path`, `sticker_cache_dir`, `max_sticker_preview_count`: shared visual sticker catalog, cached preview media, and per-atlas selection limit.
+- `companion_inbox_enabled`, `companion_inbox_notice_path`, `companion_inbox_read_command`: optional integration with the durable companion inbox described in [companion-inbox.md](companion-inbox.md).
 - `startup_context_paths`: files listed in the startup prompt.
 - `startup_autonomy_context_paths`: extra files listed only in autonomous wake startup prompts.
 - `rhythm_enabled`, `rhythm_interval_seconds`, `rhythm_message_path`: optional wake loop. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
@@ -70,6 +77,12 @@ Local file shape:
 - `proactive_compaction_resume_prompt`: prompt sent after proactive compaction succeeds when no queued user input is waiting.
 - `compaction_input_queue_path`, `compaction_replay_queue_path`: optional overrides for queued Telegram input and protected replay input paths. Defaults live under `runtime_dir`.
 - `server_overloaded_continue_prompt`: optional override for the continuation prompt sent after an OpenAI `serverOverloaded` turn failure.
+
+## Silent-Turn Recovery
+
+The inactivity guard watches real app-server progress rather than wall-clock turn duration. User messages, Telegram polling, typing indicators, token snapshots, and steer acknowledgements do not reset it. Long reasoning and long-running tools remain valid active work because their open runtime items suspend detection.
+
+When a genuinely quiet active turn reaches `turn_stall_timeout_seconds`, the bridge interrupts it and starts one same-thread continuation. An input that exposed the stall is carried into that continuation. If the recovery turn also becomes silent, automatic recovery stops and the bridge asks the operator to use `/stop`.
 
 ## MCP Runtime Control
 

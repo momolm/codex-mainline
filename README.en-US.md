@@ -8,7 +8,7 @@ It is not a reverse proxy and does not impersonate the Codex desktop app. It run
 
 This repository contains the generic bridge code only. Credentials, runtime logs, chat history, local paths, and project-specific private material are not included.
 
-Current status: public bridge with bilingual output, watchdog lifecycle scripts, image and file input, and context-compaction recovery support.
+Current status: public bridge with bilingual output, watchdog lifecycle scripts, rich Telegram intake, visual sticker delivery, context-compaction recovery, silent-turn recovery, and an optional companion inbox.
 
 ## Why This Exists
 
@@ -31,9 +31,12 @@ The result is a three-part decoupling:
 - Persistent Codex app-server thread saved in `runtime/tg_mainline/state.json`.
 - Telegram private-chat bridge using Bot API long polling.
 - Message forwarding into the same Codex context, including text, captions, photos, image files, static stickers, Telegram files, media groups, and bounded reply/quote context.
+- A short sliding collection window merges adjacent ordinary updates into one natural input while leaving single messages unwrapped.
 - Completed assistant replies rendered through Telegram native Rich Message Markdown, with automatic plain-text fallback and no streaming render state.
 - Live tool details continue across stable Telegram blocks at the platform-safe 4000-character boundary, while bounded head-tail previews keep both the start and outcome of large outputs visible.
 - Explicit local file delivery with `<tg_send_file path="..." />`.
+- A shared visual sticker shelf with live pack refresh and stable `file_unique_id` delivery through `<tg_send_sticker ... />`.
+- An optional companion inbox bot for durable asynchronous contact without creating a second Codex thread.
 - Bilingual bridge-layer mechanical output: `zh-CN` and `en-US`.
 - Bridge-level slash commands that do not enter model context:
   - `/status`
@@ -55,6 +58,7 @@ The result is a three-part decoupling:
   - queues normal messages during compaction;
   - after a failed compaction, sends a short pause turn with `gpt-5.4-mini low` to trigger native recovery;
   - injects a resume prompt after a failed compaction chain later succeeds.
+- Silent-turn guard that recovers a model stream which stops producing events, while active reasoning and tool work remain exempt from the inactivity timer.
 - Watchdog supervision for long-running local operation.
 - Optional rhythm wake messages for autonomous follow-up.
 - Work-budget watcher for long active turns.
@@ -78,6 +82,7 @@ Optional:
 - Codex desktop app. Useful for login/session inspection and local troubleshooting, but not required by the bridge.
 - A Telegram HTTP proxy, if Telegram Bot API is blocked on your network.
 - Browser/computer-use tools in your Codex environment, if you want host UI automation.
+- Python 3 and Pillow, only when generating visual sticker preview atlases.
 
 The bridge starts app-server itself by default:
 
@@ -162,9 +167,10 @@ More detailed setup notes are in [docs/installation.md](docs/installation.md).
 
 ## Windows Entrypoints
 
-The repository root exposes two double-click entrypoints:
+The repository root exposes three double-click entrypoints:
 
 - `Start-CodexMainlineWatchdog.bat`: starts the watchdog and lets it supervise the mainline.
+- `Start-CodexCompanionInbox.bat`: starts the optional asynchronous companion inbox.
 - `Stop-CodexMainlineAndWatchdog.bat`: stops both the mainline and the watchdog.
 
 The PowerShell scripts live in `scripts/`:
@@ -172,6 +178,7 @@ The PowerShell scripts live in `scripts/`:
 - `scripts/Start-CodexMainline.ps1`
 - `scripts/Stop-CodexMainline.ps1`
 - `scripts/Start-CodexMainlineWatchdog.ps1`
+- `scripts/Start-CodexCompanionInbox.ps1`
 - `scripts/Watch-CodexMainline.ps1`
 
 ## Language
@@ -227,6 +234,10 @@ Important fields:
 - `bot_commands`: Telegram slash menu registered at startup.
 - `max_message_chars`: safe Telegram text boundary; the committed default is `4000`.
 - `run_detail_output_preview_chars`: bounded head-tail preview size for each completed tool output.
+- `input_collect_seconds`, `loose_media_collect_seconds`, `rapid_empty_poll_backoff_seconds`: adjacent-input collection and Telegram polling latency controls.
+- `turn_stall_timeout_seconds`: quiet-period threshold for recovering a silent active turn; active reasoning and tool items suspend the detector.
+- `sticker_catalog_path`, `sticker_cache_dir`, `max_sticker_preview_count`: shared visual sticker shelf storage and preview limits.
+- `companion_inbox_*`: optional asynchronous companion inbox notice integration.
 - `startup_context_paths`: files included in the first startup prompt.
 - `startup_autonomy_context_paths`: extra files listed only for autonomous wake startup prompts.
 - `rhythm_*`: optional autonomous wake settings. `rhythm_enabled` defaults to `false`; enable it explicitly with `/rhythm on` or config.
@@ -256,6 +267,12 @@ When Codex needs to send a local file to Telegram, it should include this marker
 
 The bridge removes the marker from visible text, validates the path, and sends images as photos and other files through Telegram file upload. Files under `config/` and `runtime/` are blocked from delivery.
 
+Visual sticker delivery uses a stable identity selected from the live sticker shelf:
+
+```xml
+<tg_send_sticker set="set_name" file_unique_id="stable_file_unique_id" />
+```
+
 ## Boundaries
 
 - Codex Mainline is a local bridge around the official Codex CLI app-server. It is not a hosted service.
@@ -275,3 +292,4 @@ The bridge removes the marker from visible text, validates the path, and sends i
 - [docs/i18n.md](docs/i18n.md)
 - [docs/codex-field-inheritance.md](docs/codex-field-inheritance.md)
 - [docs/security.md](docs/security.md)
+- [docs/companion-inbox.md](docs/companion-inbox.md)
