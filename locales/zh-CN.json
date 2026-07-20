@@ -43,6 +43,7 @@
     "autonomyIntro": "然后读取自主行动材料：",
     "replyRule": "读完后，我不输出冗长启动报告，直接自然回复用户。后续保持同一个上下文自然对话。",
     "deliveryRule": "当前入口是 Telegram；当我确实需要把本地文件交付回 Telegram 时，在回复末尾输出 <tg_send_file path=\"本地文件路径\" />。普通聊天和分析不使用该标记。",
+    "stickerRule": "当我想发送已登记的 Telegram 贴纸时，输出 <tg_send_sticker set=\"贴纸包名\" file_unique_id=\"稳定贴纸 ID\" />；视觉选择与贴纸包管理使用 companion inbox 的 --sticker-pack 命令。",
     "wakeRule": "启动完成后，我按自主行动规则推进一个可收口的小工作包。不制定复杂流程，不进入额外状态机。",
     "wakeAction": "自主行动。"
   },
@@ -142,6 +143,12 @@
       "【节律-休息】",
       "你已经持续工作了一段时间。请先自然收束这一轮，记录必要结果或续作计划，然后停下来休息一会。"
     ]
+  },
+  "turnStall": {
+    "recoveryNotice": "模型生成流持续静默，Codex Mainline 已自动中断停滞 turn，并在同一上下文中恢复工作。",
+    "recoveryPrompt": "【Codex Mainline】: 上一轮模型生成流在已有进展后持续静默，主线已中断该停滞 turn。请依据同一 thread 中的现有上下文和工作区状态，继续上一轮尚未完成的任务；先简短告知用户已自动恢复。",
+    "inputPrompt": "【Codex Mainline】: 上一轮模型生成流在已有进展后持续静默，主线已中断该停滞 turn。请优先处理下面这条用户消息，并结合现有上下文继续未完成工作。",
+    "recoveryFailedNotice": "模型流静默恢复未能释放旧 turn，自动恢复已经停止。请发送 /stop 后继续。"
   },
   "compaction": {
     "started": "Codex Mainline 正在压缩上下文，稍等一下。",
@@ -358,6 +365,12 @@
     "requestHeader": "【Computer Use 请求】",
     "requestLine1": "请使用官方 Computer Use 插件处理下面的 Windows 桌面任务。",
     "requestLine2": "先读取本地 computer-use 插件说明，按官方最小 bootstrap 连接并用 sky.list_apps() 轻量验证；不要在完成 bootstrap 前判断不可用。"
+  },
+  "companionInbox": {
+    "unreadNotice": "【Codex Companion Inbox】有 {count} 条未读消息。",
+    "readCommand": "tool：`{command}`",
+    "logLabel": "Companion Inbox -> Codex",
+    "startupLabel": "Codex Companion Inbox 提醒"
   },
   "main": {
     "dryRunTitle": "Codex Mainline - Dry Run",

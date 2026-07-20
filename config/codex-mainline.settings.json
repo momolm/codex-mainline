@@ -64,10 +64,18 @@
   "state_path": "runtime/tg_mainline/state.json",
   "runtime_dir": "runtime/tg_mainline",
   "poll_timeout_seconds": 25,
-  "idle_sleep_seconds": 2,
+  "rapid_empty_poll_backoff_seconds": 2,
   "history_search_limit": 8,
   "media_group_collect_seconds": 2,
+  "input_collect_seconds": 1,
   "loose_media_collect_seconds": 3,
+  "outbound_attachment_max_bytes": 47185920,
+  "sticker_catalog_path": "runtime/telegram_shared/sticker_sets/catalog.json",
+  "sticker_cache_dir": "runtime/telegram_shared/sticker_sets/cache",
+  "max_sticker_preview_count": 24,
+  "companion_inbox_enabled": false,
+  "companion_inbox_notice_path": "runtime/companion_inbox/notice.json",
+  "companion_inbox_read_command": "node src/start-codex-companion-inbox.mjs --read 10",
   "turn_max_wait_seconds": 2700,
   "rhythm_enabled": false,
   "rhythm_interval_seconds": 300,
@@ -80,6 +88,23 @@
   "work_budget_prompt_path": {
     "zh-CN": "prompts/work_budget_rest.zh-CN.md",
     "en-US": "prompts/work_budget_rest.en-US.md"
+  },
+  "turn_stall_timeout_seconds": 180,
+  "turn_stall_recovery_notice": {
+    "zh-CN": "模型生成流持续静默，Codex Mainline 已自动中断停滞 turn，并在同一上下文中恢复工作。",
+    "en-US": "The model stream stayed silent, so Codex Mainline interrupted the stalled turn and resumed work in the same context."
+  },
+  "turn_stall_recovery_prompt": {
+    "zh-CN": "【Codex Mainline】: 上一轮模型生成流在已有进展后持续静默，主线已中断该停滞 turn。请依据同一 thread 中的现有上下文和工作区状态，继续上一轮尚未完成的任务；先简短告知用户已自动恢复。",
+    "en-US": "[Codex Mainline]: The previous model stream stayed silent after making progress, so the stalled turn was interrupted. Continue the unfinished task from the same thread context and workspace state; first briefly tell the user that automatic recovery succeeded."
+  },
+  "turn_stall_input_prompt": {
+    "zh-CN": "【Codex Mainline】: 上一轮模型生成流在已有进展后持续静默，主线已中断该停滞 turn。请优先处理下面这条用户消息，并结合现有上下文继续未完成工作。",
+    "en-US": "[Codex Mainline]: The previous model stream stayed silent after making progress, so the stalled turn was interrupted. Prioritize the user message below and continue unfinished work using the current context."
+  },
+  "turn_stall_recovery_failed_notice": {
+    "zh-CN": "模型流静默恢复未能释放旧 turn，自动恢复已经停止。请发送 /stop 后继续。",
+    "en-US": "Silent-stream recovery could not release the old turn and has stopped. Send /stop before continuing."
   },
   "rest_seconds": 600,
   "context_compaction_trigger_used_percent": 90,

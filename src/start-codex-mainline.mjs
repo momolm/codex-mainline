@@ -22,6 +22,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { evaluateEffortShiftRequest } from "./effort-shift-request.mjs";
+import { bufferTelegramInput } from "./telegram-input-buffer.mjs";
+import {
+  extensionFromTelegramFile as normalizedTelegramFileExtension,
+  imageDescriptorsFromTelegramMessage,
+  safeFileName as normalizedTelegramFileName,
+  telegramAttachmentDescriptors,
+  telegramMessageKind as normalizedTelegramMessageKind,
+  telegramMessageShape,
+  telegramMessageText as normalizedTelegramMessageText,
+} from "./telegram-inbound-media.mjs";
 import {
   formatMcpRuntimeStatus,
   listMcpServerInventory,
@@ -30,10 +40,16 @@ import {
   reloadMcpServerInventory,
 } from "./mcp-runtime-control.mjs";
 import { deliverAssistantText } from "./telegram-reply-delivery.mjs";
+import { extractTelegramDeliveries } from "./telegram-delivery-directives.mjs";
 import {
   TELEGRAM_SAFE_MESSAGE_CHARS,
   renderRunDetailBlocks,
 } from "./telegram-run-detail-blocks.mjs";
+import {
+  defaultStickerLibraryPaths,
+  registerStickerSetNames,
+  resolveStickerForSend,
+} from "./telegram-sticker-library.mjs";
 import {
   DEFAULT_TOOL_OUTPUT_PREVIEW_CHARS,
   capturedToolOutputLiveHead,
@@ -42,6 +58,7 @@ import {
   formatCapturedToolOutputPreview,
   formatToolOutputPreview,
 } from "./telegram-tool-output-preview.mjs";
+import { TurnInactivityGuard } from "./turn-inactivity-guard.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -674,6 +691,11 @@ function defaultState() {
     server_overloaded_last_turn_id: null,
     server_overloaded_resume_requested_for_turn_id: null,
     server_overloaded_recovery_turn_id: null,
+    turn_stall_last_detected_at: null,
+    turn_stall_last_turn_id: null,
+    turn_stall_last_progress_kind: null,
+    turn_stall_recovery_turn_id: null,
+    turn_stall_recovery_failed_at: null,
     last_error: null,
     created_at: iso(),
     updated_at: iso(),
@@ -1324,6 +1346,52 @@ function nextUpdateOffsetForUpdate({ state, updateId, runtimeDir }) {
   return Math.max(currentOffset, nextOffset);
 }
 
+function companionInboxNoticePath(config) {
+  if (!config.companion_inbox_notice_path) return null;
+  return resolveWorkspacePath(String(config.companion_inbox_notice_path));
+}
+
+function companionInboxNoticeStatePath(config, runtimeDir) {
+  return config.companion_inbox_notice_state_path
+    ? resolveWorkspacePath(String(config.companion_inbox_notice_state_path))
+    : path.join(runtimeDir, "companion_inbox_notice_state.json");
+}
+
+function loadCompanionInboxNotice(config) {
+  if (config.companion_inbox_enabled !== true) return null;
+  const noticePath = companionInboxNoticePath(config);
+  if (!noticePath || !existsSync(noticePath)) return null;
+  let notice = null;
+  try {
+    notice = readJson(noticePath);
+  } catch {
+    return null;
+  }
+  const unreadCount = Number(notice?.unread_count || 0);
+  const latestUnreadId = Number(notice?.latest_unread_id || 0);
+  if (!Number.isFinite(unreadCount) || unreadCount <= 0 || !Number.isFinite(latestUnreadId) || latestUnreadId <= 0) {
+    return null;
+  }
+  return {
+    unreadCount: Math.trunc(unreadCount),
+    latestUnreadId: Math.trunc(latestUnreadId),
+    updatedAt: String(notice?.updated_at || ""),
+  };
+}
+
+function companionInboxNoticeKey(notice) {
+  return `${notice.latestUnreadId}:${notice.unreadCount}:${notice.updatedAt}`;
+}
+
+function companionInboxReminderText(config, notice) {
+  const command = String(config.companion_inbox_read_command || "node src/start-codex-companion-inbox.mjs --read 10");
+  return [
+    t(config, "companionInbox.unreadNotice", { count: notice.unreadCount }),
+    "",
+    t(config, "companionInbox.readCommand", { command }),
+  ].join("\n");
+}
+
 function compactionInputQueuePath(config, runtimeDir) {
   if (config.compaction_input_queue_path) {
     return resolveWorkspacePath(String(config.compaction_input_queue_path));
@@ -1484,13 +1552,11 @@ function drainCompactionInputQueue(config, runtimeDir) {
 }
 
 function safeFileName(value, fallback) {
-  const cleaned = String(value || fallback || "file").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim();
-  return cleaned || fallback || "file";
+  return normalizedTelegramFileName(value, fallback || "file");
 }
 
 function extensionFromTelegramFile(filePath, fallback = ".jpg") {
-  const ext = path.extname(String(filePath || "")).toLowerCase();
-  return ext || fallback;
+  return normalizedTelegramFileExtension(filePath, fallback);
 }
 
 function isTelegramPhotoPath(filePath) {
@@ -1514,31 +1580,6 @@ function telegramFileDescriptor(message) {
   };
 }
 
-function xmlUnescape(value) {
-  return String(value || "")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
-}
-
-function extractTelegramSendFiles(text) {
-  const files = [];
-  const cleaned = String(text || "").replace(
-    /<tg_send_file\b([^>]*)\/?>\s*(?:<\/tg_send_file>)?/gi,
-    (full, attrs) => {
-      const pathMatch = String(attrs || "").match(/\bpath\s*=\s*(?:"([^"]+)"|'([^']+)')/i);
-      if (pathMatch) {
-        const filePath = xmlUnescape(pathMatch[1] ?? pathMatch[2] ?? "").trim();
-        if (filePath && filePath !== "..." && !filePath.includes("...")) files.push(filePath);
-      }
-      return "";
-    },
-  );
-  return { text: cleaned.trim(), files };
-}
-
 function resolveDeliveryFilePath(filePath) {
   const rawPath = String(filePath || "").trim();
   if (!rawPath) throw new Error("empty delivery file path");
@@ -1560,26 +1601,11 @@ function resolveDeliveryFilePath(filePath) {
 }
 
 function imageDescriptorsFromMessage(message) {
-  const images = [];
-  if (Array.isArray(message.photo) && message.photo.length > 0) {
-    const photo = [...message.photo].sort((a, b) => Number(b.file_size || 0) - Number(a.file_size || 0))[0] ?? message.photo.at(-1);
-    if (photo?.file_id) images.push({ fileId: photo.file_id, fallbackName: "photo.jpg" });
-  }
-  const document = message.document;
-  if (document?.file_id && String(document.mime_type || "").startsWith("image/")) {
-    images.push({ fileId: document.file_id, fallbackName: document.file_name || "image" });
-  }
-  const sticker = message.sticker;
-  if (sticker?.file_id && !sticker.is_animated && !sticker.is_video) {
-    images.push({ fileId: sticker.file_id, fallbackName: "sticker.webp" });
-  }
-  return images;
+  return imageDescriptorsFromTelegramMessage(message);
 }
 
 function telegramMessageText(message) {
-  if (typeof message?.text === "string") return message.text;
-  if (typeof message?.caption === "string") return message.caption;
-  return "";
+  return normalizedTelegramMessageText(message);
 }
 
 function telegramMediaGroupId(message) {
@@ -1593,12 +1619,21 @@ function mediaGroupBufferKey(message) {
   return `${message?.chat?.id ?? "unknown"}:${groupId}`;
 }
 
-function looseInputBufferKey(message) {
-  return `${message?.chat?.id ?? "unknown"}:loose-media`;
+function inputBufferKey(message) {
+  return `${message?.chat?.id ?? "unknown"}:input`;
 }
 
 function telegramMessageHasImage(message) {
   return imageDescriptorsFromMessage(message).length > 0;
+}
+
+function telegramMessageHasModelInput(message) {
+  return Boolean(
+    telegramMessageText(message).trim()
+    || telegramMessageHasImage(message)
+    || telegramFileDescriptor(message)
+    || message?.reply_to_message,
+  );
 }
 
 function telegramSenderLabel(message) {
@@ -1611,21 +1646,7 @@ function telegramSenderLabel(message) {
 }
 
 function telegramMessageKind(message) {
-  if (!message) return "unknown";
-  if (typeof message.text === "string") return "text";
-  if (Array.isArray(message.photo) && message.photo.length > 0) return "photo";
-  if (message.document) return String(message.document.mime_type || "").startsWith("image/") ? "file:image" : "file";
-  if (message.sticker) return "sticker";
-  if (message.animation) return "animation";
-  if (message.video) return "video";
-  if (message.voice) return "voice";
-  if (message.audio) return "audio";
-  if (message.video_note) return "video_note";
-  if (message.contact) return "contact";
-  if (message.location) return "location";
-  if (message.venue) return "venue";
-  if (message.poll) return "poll";
-  return "other";
+  return normalizedTelegramMessageKind(message);
 }
 
 function telegramAttachmentSummary(message) {
@@ -1824,8 +1845,36 @@ function normalizeTelegramMessages(messages) {
     });
 }
 
+function stickerCatalogPath(config) {
+  return config.sticker_catalog_path
+    ? resolveWorkspacePath(String(config.sticker_catalog_path))
+    : defaultStickerLibraryPaths(WORKSPACE_ROOT).catalogPath;
+}
+
 async function buildTelegramInputFromMessages({ token, messages, runtimeDir, config }) {
   const normalized = normalizeTelegramMessages(messages);
+  const stickerSetNames = normalized
+    .flatMap((message) => telegramAttachmentDescriptors(message))
+    .map((attachment) => attachment.setName)
+    .filter(Boolean);
+  if (stickerSetNames.length > 0) {
+    const registration = await registerStickerSetNames({
+      catalogPath: stickerCatalogPath(config),
+      setNames: stickerSetNames,
+      getStickerSet: (name) => telegramApi(token, "getStickerSet", { name }),
+    });
+    if (registration.added.length > 0 || registration.failed.length > 0) {
+      appendJsonl(path.join(runtimeDir, "telegram_stickers.jsonl"), {
+        direction: "recv_sticker_set_registration",
+        added: registration.added.map((entry) => ({
+          set_name: entry.name,
+          title: entry.title,
+          sticker_count: entry.sticker_count,
+        })),
+        failed: registration.failed,
+      });
+    }
+  }
   const primaryMessage = normalized[0] ?? null;
   const pulseHeader = buildTelegramPulseHeader(config, primaryMessage);
   const replyCarrier = normalized.find((message) => message.reply_to_message) ?? primaryMessage;
@@ -2099,6 +2148,7 @@ function buildStartupPrompt(config, userText, sourceLabel = null) {
     "",
     t(config, "startup.replyRule"),
     t(config, "startup.deliveryRule"),
+    t(config, "startup.stickerRule"),
     "",
     `【${label}】`,
     userText,
@@ -2122,6 +2172,7 @@ function buildWakePrompt(config) {
   lines.push(
     t(config, "startup.wakeRule"),
     t(config, "startup.deliveryRule"),
+    t(config, "startup.stickerRule"),
     "",
     t(config, "startup.wakeAction"),
   );
@@ -2156,6 +2207,26 @@ function workBudgetSeconds(config) {
   return Math.max(60, Math.trunc(numberFromConfig(config, "work_budget_seconds", 1200)));
 }
 
+function turnStallTimeoutSeconds(config) {
+  return Math.max(60, Math.trunc(numberFromConfig(config, "turn_stall_timeout_seconds", 180)));
+}
+
+function turnStallRecoveryNotice(config) {
+  return localizedConfigText(config, "turn_stall_recovery_notice", "turnStall.recoveryNotice");
+}
+
+function turnStallRecoveryPrompt(config) {
+  return localizedConfigText(config, "turn_stall_recovery_prompt", "turnStall.recoveryPrompt");
+}
+
+function turnStallInputPrompt(config) {
+  return localizedConfigText(config, "turn_stall_input_prompt", "turnStall.inputPrompt");
+}
+
+function turnStallRecoveryFailedNotice(config) {
+  return localizedConfigText(config, "turn_stall_recovery_failed_notice", "turnStall.recoveryFailedNotice");
+}
+
 function typingActionIntervalSeconds(config) {
   return Math.max(1, Math.min(4, Math.trunc(numberFromConfig(config, "typing_action_interval_seconds", 4))));
 }
@@ -2183,6 +2254,10 @@ function compactingSeconds(config) {
 
 function mediaGroupCollectSeconds(config) {
   return Math.max(1, Math.trunc(numberFromConfig(config, "media_group_collect_seconds", 2)));
+}
+
+function inputCollectSeconds(config) {
+  return Math.max(0.1, numberFromConfig(config, "input_collect_seconds", 1));
 }
 
 function looseMediaCollectSeconds(config) {
@@ -3627,6 +3702,9 @@ class MainlineSession {
     this.computerUseTurnIds = new Set();
     this.typingIndicatorToken = null;
     this.typingIndicatorPromise = Promise.resolve();
+    this.turnInactivityGuard = new TurnInactivityGuard({
+      timeoutMs: turnStallTimeoutSeconds(config) * 1000,
+    });
   }
 
   async ensureConnected() {
@@ -3817,6 +3895,104 @@ class MainlineSession {
       turnId: this.state.active_turn_id,
     });
     return { interrupted: true, turnId: this.state.active_turn_id };
+  }
+
+  stalledTurnCandidate() {
+    return this.turnInactivityGuard.candidate({ turnId: this.state.active_turn_id });
+  }
+
+  async waitForTurnRelease(turnId, timeoutMs = 5_000) {
+    const deadline = Date.now() + Math.max(100, Number(timeoutMs) || 5_000);
+    while (Date.now() < deadline) {
+      const latest = loadState(this.statePath);
+      this.state = latest;
+      if (latest.active_turn_id !== turnId) return true;
+      await delay(100);
+    }
+    return false;
+  }
+
+  async recoverStalledTurn({ input = null, inputOptions = null } = {}) {
+    const candidate = this.stalledTurnCandidate();
+    if (!candidate) return { handled: false, turn: null };
+
+    this.turnInactivityGuard.markRecoveryAttempted(candidate.turnId);
+    const detectedAt = iso();
+    patchState(this.statePath, this.state, {
+      turn_stall_last_detected_at: detectedAt,
+      turn_stall_last_turn_id: candidate.turnId,
+      turn_stall_last_progress_kind: candidate.lastProgressKind,
+      turn_stall_recovery_failed_at: null,
+    });
+    appendLifecycle(this.runtimeDir, "turn_stall_detected", {
+      turn_id: candidate.turnId,
+      quiet_ms: candidate.quietMs,
+      last_progress_kind: candidate.lastProgressKind,
+    });
+
+    if (this.state.turn_stall_recovery_turn_id === candidate.turnId) {
+      patchState(this.statePath, this.state, { turn_stall_recovery_failed_at: detectedAt });
+      this.relayToTelegram(turnStallRecoveryFailedNotice(this.config));
+      logSystem(`turn stall recovery stopped after one attempt: ${candidate.turnId}`);
+      return { handled: true, turn: null, reason: "recovery_turn_stalled" };
+    }
+
+    logSystem(`turn stall detected: turn=${candidate.turnId}, quiet_ms=${candidate.quietMs}, last=${candidate.lastProgressKind}`);
+    let interruptResult;
+    try {
+      interruptResult = await this.interruptActiveTurn();
+    } catch (error) {
+      const message = error?.stack || String(error);
+      patchState(this.statePath, this.state, {
+        turn_stall_recovery_failed_at: iso(),
+        last_error: message,
+      });
+      this.relayToTelegram(turnStallRecoveryFailedNotice(this.config));
+      logSystem(`turn stall interrupt failed: ${error?.message || error}`);
+      return { handled: true, turn: null, reason: "interrupt_failed" };
+    }
+
+    if (!interruptResult.interrupted || !(await this.waitForTurnRelease(candidate.turnId))) {
+      patchState(this.statePath, this.state, {
+        turn_stall_recovery_failed_at: iso(),
+        last_error: `stalled turn did not release: ${candidate.turnId}`,
+      });
+      this.relayToTelegram(turnStallRecoveryFailedNotice(this.config));
+      logSystem(`turn stall release timed out: ${candidate.turnId}`);
+      return { handled: true, turn: null, reason: "release_timeout" };
+    }
+
+    this.relayToTelegram(turnStallRecoveryNotice(this.config));
+    const recoveryInput = input === null
+      ? withSystemPulseHeader(this.config, turnStallRecoveryPrompt(this.config))
+      : prependTextToInput(withSystemPulseHeader(this.config, turnStallInputPrompt(this.config)), input);
+    try {
+      const turn = await this.startTurn(recoveryInput, {
+        ...(inputOptions || {}),
+        startup: false,
+        typingIndicator: true,
+      });
+      patchState(this.statePath, this.state, {
+        turn_stall_recovery_turn_id: turn?.turnId ?? null,
+        turn_stall_recovery_failed_at: null,
+        last_error: null,
+      });
+      appendLifecycle(this.runtimeDir, "turn_stall_recovery_started", {
+        stalled_turn_id: candidate.turnId,
+        recovery_turn_id: turn?.turnId ?? null,
+        carried_input: input !== null,
+      });
+      return { handled: true, turn, candidate };
+    } catch (error) {
+      const message = error?.stack || String(error);
+      patchState(this.statePath, this.state, {
+        turn_stall_recovery_failed_at: iso(),
+        last_error: message,
+      });
+      this.relayToTelegram(turnStallRecoveryFailedNotice(this.config));
+      logSystem(`turn stall continuation failed: ${error?.message || error}`);
+      return { handled: true, turn: null, reason: "continuation_failed" };
+    }
   }
 
   async startContextCompaction({ model = null, effort = null, resumeReason = null } = {}) {
@@ -4750,16 +4926,49 @@ class MainlineSession {
     this.pendingTelegramRelays.push(relay);
   }
 
+  relayStickerFromLibrary({ setName, index, fileUniqueId = null }) {
+    const relay = this.telegramRelayQueue.then(async () => {
+      const { sticker, fileId } = await resolveStickerForSend({
+        catalogPath: stickerCatalogPath(this.config),
+        setName,
+        index,
+        fileUniqueId,
+        getStickerSet: (name) => telegramApi(this.token, "getStickerSet", { name }),
+      });
+      const result = await telegramApi(this.token, "sendSticker", {
+        chat_id: this.chatId,
+        sticker: fileId,
+      });
+      appendJsonl(path.join(this.runtimeDir, "telegram_stickers.jsonl"), {
+        direction: "send_sticker_from_library",
+        message_id: result?.message_id ?? null,
+        set_name: setName,
+        sticker_index: sticker.index,
+        file_unique_id: sticker.file_unique_id,
+      });
+      return true;
+    }).catch((error) => {
+      patchState(this.statePath, this.state, { last_error: error.stack || String(error) });
+      logSystem(`TG sticker relay failed: ${error.message || error}`);
+      return false;
+    });
+    this.telegramRelayQueue = relay.then(() => undefined, () => undefined);
+    this.pendingTelegramRelays.push(relay);
+  }
+
   relayAssistantItem(itemId, text) {
     const key = String(itemId || `assistant-${this.sentAssistantItems.size + 1}`);
     if (this.sentAssistantItems.has(key)) return;
-    const { text: visibleText, files } = extractTelegramSendFiles(text);
-    if (!visibleText.trim() && files.length === 0) return;
+    const { text: visibleText, files, stickers } = extractTelegramDeliveries(text);
+    if (!visibleText.trim() && files.length === 0 && stickers.length === 0) return;
     this.sentAssistantItems.add(key);
     this.closeRunDetailSegment();
     if (visibleText.trim()) this.relayToTelegram(visibleText, { richMarkdown: true });
     for (const filePath of files) {
       this.relayDeliveryFile(filePath);
+    }
+    for (const sticker of stickers) {
+      this.relayStickerFromLibrary(sticker);
     }
   }
 
@@ -4796,6 +5005,8 @@ class MainlineSession {
   }
 
   handleNotification(message) {
+    this.turnInactivityGuard.noteNotification(message);
+
     if (message.method === "mcpServer/startupStatus/updated") {
       const item = message.params ?? {};
       const name = String(item.name ?? "").trim();
@@ -5051,6 +5262,9 @@ class MainlineSession {
       if (serverOverloadedRecoveryTurn) {
         patch.server_overloaded_recovery_turn_id = null;
       }
+      if (turnId && this.state.turn_stall_recovery_turn_id === turnId) {
+        patch.turn_stall_recovery_turn_id = null;
+      }
       if (turnId && this.state.work_budget_turn_id === turnId && this.state.work_budget_steered_at) {
         const now = new Date();
         Object.assign(patch, {
@@ -5111,6 +5325,11 @@ class MainlineSession {
 async function handleText({ session, config, state, statePath, text, startup, startupSourceLabel = null }) {
   patchState(statePath, state, { last_input_at: iso() });
   if (state.active_turn_id) {
+    const recovery = await session.recoverStalledTurn({
+      input: text,
+      inputOptions: { startupSourceLabel },
+    });
+    if (recovery.handled) return recovery.turn;
     try {
       session.enableTypingIndicatorForCurrentTurn("user_append");
       await session.steer(text);
@@ -5141,6 +5360,16 @@ async function handleInput({
 }) {
   patchState(statePath, state, { last_input_at: iso() });
   if (state.active_turn_id) {
+    const recovery = await session.recoverStalledTurn({
+      input,
+      inputOptions: {
+        startupSourceLabel,
+        protectInputOnCompactionFailure,
+        protectedInputReason,
+        protectedInputMetadata,
+      },
+    });
+    if (recovery.handled) return recovery.turn;
     try {
       session.enableTypingIndicatorForCurrentTurn("user_append");
       await session.steer(input);
@@ -5262,32 +5491,26 @@ function queueMediaGroupMessage({ pendingMediaGroups, message, config, runtimeDi
   return existing;
 }
 
-function queueLooseInputMessage({ pendingLooseInputs, message, config, runtimeDir }) {
-  const key = looseInputBufferKey(message);
+function queueInputMessage({ pendingInputGroups, message, config, runtimeDir }) {
+  const key = inputBufferKey(message);
   const now = Date.now();
-  const existing = pendingLooseInputs.get(key) ?? {
+  const existing = bufferTelegramInput({
+    pendingInputs: pendingInputGroups,
     key,
-    messages: new Map(),
-    firstSeenAt: now,
-    flushAt: now,
-    imageMessageCount: 0,
-  };
-  const messageKey = String(message.message_id ?? `${now}:${existing.messages.size}`);
-  if (!existing.messages.has(messageKey) && telegramMessageHasImage(message)) {
-    existing.imageMessageCount += 1;
-  }
-  existing.messages.set(messageKey, message);
-  existing.flushAt = now + looseMediaCollectSeconds(config) * 1000;
-  existing.updatedAt = now;
-  pendingLooseInputs.set(key, existing);
+    message,
+    hasImage: telegramMessageHasImage(message),
+    now,
+    inputCollectSeconds: inputCollectSeconds(config),
+    imageCollectSeconds: looseMediaCollectSeconds(config),
+  });
   appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
-    direction: "recv_loose_media_part",
+    direction: "recv_input_buffered",
     message_id: message.message_id ?? null,
     buffered_messages: existing.messages.size,
     image_messages: existing.imageMessageCount,
     flush_after_ms: Math.max(0, existing.flushAt - now),
   });
-  logSystem(`TG loose media part buffered: count=${existing.messages.size}, image_messages=${existing.imageMessageCount}`);
+  logSystem(`TG input buffered: count=${existing.messages.size}, image_messages=${existing.imageMessageCount}`);
   return existing;
 }
 
@@ -5338,16 +5561,16 @@ async function flushDueMediaGroups({ pendingMediaGroups, session, statePath, tok
   return lastTurn;
 }
 
-async function flushDueLooseInputs({ pendingLooseInputs, session, statePath, token, runtimeDir, force = false }) {
+async function flushDueInputGroups({ pendingInputGroups, session, statePath, token, runtimeDir, force = false }) {
   const now = Date.now();
-  const due = [...pendingLooseInputs.values()]
+  const due = [...pendingInputGroups.values()]
     .filter((group) => force || group.flushAt <= now)
     .sort((a, b) => a.firstSeenAt - b.firstSeenAt);
   let lastTurn = null;
   for (const group of due) {
-    pendingLooseInputs.delete(group.key);
+    pendingInputGroups.delete(group.key);
     const messages = normalizeTelegramMessages([...group.messages.values()]);
-    logSystem(`TG loose media group flushed: count=${messages.length}, image_messages=${group.imageMessageCount}`);
+    logSystem(`TG input batch flushed: count=${messages.length}, image_messages=${group.imageMessageCount}`);
     const state = loadState(statePath);
     session.state = state;
     if (isCompactionBlocked(state) || state.compacting_until || shouldStoreInputForCompactionResume(state)) {
@@ -5356,8 +5579,8 @@ async function flushDueLooseInputs({ pendingLooseInputs, session, statePath, tok
         runtimeDir,
         messages,
         reason: shouldStoreInputForCompactionResume(state)
-          ? `${compactionResumeReason(state) || "compaction"}_resume_pending_loose_media`
-          : "compaction_locked_loose_media",
+          ? `${compactionResumeReason(state) || "compaction"}_resume_pending_input_batch`
+          : "compaction_locked_input_batch",
       });
       continue;
     }
@@ -5516,6 +5739,13 @@ async function maybeRunCompactionRecovery({ session, config, state, statePath })
     session.relayToTelegram(compactionRecoveryExhaustedNotice(config, nextAttempt));
     return null;
   }
+}
+
+async function maybeRunTurnStallRecovery({ session, state }) {
+  if (!state.active_turn_id) return null;
+  session.state = state;
+  const result = await session.recoverStalledTurn();
+  return result.handled ? result.turn : null;
 }
 
 async function maybeRunCompactionRecoveryResume({ session, config, state, statePath }) {
@@ -5957,6 +6187,44 @@ async function maybeRunCompactionQueuedInputs({ session, config, state, statePat
   return result.turn;
 }
 
+async function maybeRunCompanionInboxNotice({ session, config, state, statePath, runtimeDir }) {
+  const notice = loadCompanionInboxNotice(config);
+  if (!notice || isCompactionBlocked(state) || state.active_turn_id) return null;
+  if (state.compacting_until) {
+    session.noteContextCompactionTimedOut();
+    return null;
+  }
+  if (isResting(state)) clearRest(statePath, state, "companion inbox notice");
+
+  const noticeStatePath = companionInboxNoticeStatePath(config, runtimeDir);
+  const noticeState = existsSync(noticeStatePath) ? readJson(noticeStatePath) : {};
+  const key = companionInboxNoticeKey(notice);
+  if (noticeState.last_notified_key === key) return null;
+
+  writeJson(noticeStatePath, {
+    schema_version: 1,
+    last_notified_key: key,
+    last_notified_at: iso(),
+    latest_unread_id: notice.latestUnreadId,
+    unread_count: notice.unreadCount,
+  });
+
+  const reminder = withSystemPulseHeader(config, companionInboxReminderText(config, notice), {
+    source: "companion_inbox",
+    channel: "companion_inbox_notice",
+  });
+  logBlock(t(config, "companionInbox.logLabel"), reminder);
+  return await handleText({
+    session,
+    config,
+    state,
+    statePath,
+    text: reminder,
+    startup: !state.thread_id,
+    startupSourceLabel: t(config, "companionInbox.startupLabel"),
+  });
+}
+
 async function maybeRunRhythm({ session, config, state, statePath, token, chatId, maxChars, runtimeDir }) {
   if (!rhythmEnabled(config)) return null;
   ensureNextWake(config, statePath, state);
@@ -6065,7 +6333,7 @@ async function main() {
 
   const maxChars = Math.trunc(numberFromConfig(config, "max_message_chars", TELEGRAM_SAFE_MESSAGE_CHARS));
   const pollTimeout = Math.trunc(numberFromConfig(config, "poll_timeout_seconds", 25));
-  const idleSleep = numberFromConfig(config, "idle_sleep_seconds", 2);
+  const rapidEmptyPollBackoffSeconds = numberFromConfig(config, "rapid_empty_poll_backoff_seconds", 2);
 
   if (options.dryRun) {
     const peek = peekSecrets(config);
@@ -6211,7 +6479,7 @@ async function main() {
   });
   state = reloadState();
   const pendingMediaGroups = new Map();
-  const pendingLooseInputs = new Map();
+  const pendingInputGroups = new Map();
   writeJson(readyPath, {
     pid: process.pid,
     endpoint: config.app_server_endpoint,
@@ -6337,8 +6605,8 @@ async function main() {
         token: secrets.token,
         runtimeDir,
       });
-      const flushedLooseInputTurn = await flushDueLooseInputs({
-        pendingLooseInputs,
+      const flushedInputGroupTurn = await flushDueInputGroups({
+        pendingInputGroups,
         session,
         statePath,
         token: secrets.token,
@@ -6348,13 +6616,22 @@ async function main() {
         await flushedMediaGroupTurn.done;
         return;
       }
-      if (options.once && flushedLooseInputTurn?.done) {
-        await flushedLooseInputTurn.done;
+      if (options.once && flushedInputGroupTurn?.done) {
+        await flushedInputGroupTurn.done;
         return;
       }
 
       state = reloadState();
-      if (pendingMediaGroups.size === 0 && pendingLooseInputs.size === 0) {
+      if (pendingMediaGroups.size === 0 && pendingInputGroups.size === 0) {
+        const stallRecoveryTurn = await maybeRunTurnStallRecovery({ session, state });
+        if (options.once && stallRecoveryTurn?.done) {
+          await stallRecoveryTurn.done;
+          return;
+        }
+        if (stallRecoveryTurn) {
+          continue;
+        }
+        state = reloadState();
         await maybeRunWorkBudget({ session, config, state, statePath });
       }
 
@@ -6393,16 +6670,18 @@ async function main() {
       }
 
       state = reloadState();
-      const bufferedInputFlushDelayMs = nextBufferedInputFlushDelayMs(pendingMediaGroups, pendingLooseInputs);
+      const bufferedInputFlushDelayMs = nextBufferedInputFlushDelayMs(pendingMediaGroups, pendingInputGroups);
       const effectivePollTimeout = bufferedInputFlushDelayMs === null
         ? pollTimeout
         : Math.max(1, Math.min(pollTimeout, Math.ceil(bufferedInputFlushDelayMs / 1000)));
+      const pollStartedAt = Date.now();
       const updates = await getUpdates({
         token: secrets.token,
         offset: state.update_offset,
         timeoutSeconds: effectivePollTimeout,
         runtimeDir,
       });
+      const pollElapsedMs = Date.now() - pollStartedAt;
 
       for (const update of updates) {
         const nextUpdateOffset = nextUpdateOffsetForUpdate({
@@ -7294,10 +7573,11 @@ async function main() {
           continue;
         }
 
-        const looseInputKey = looseInputBufferKey(message);
-        if (telegramMessageHasImage(message) || pendingLooseInputs.has(looseInputKey)) {
-          queueLooseInputMessage({
-            pendingLooseInputs,
+        const bufferedInputKey = inputBufferKey(message);
+        const hasModelInput = telegramMessageHasModelInput(message);
+        if (hasModelInput && (telegramMessageHasImage(message) || pendingInputGroups.has(bufferedInputKey))) {
+          queueInputMessage({
+            pendingInputGroups,
             message,
             config,
             runtimeDir,
@@ -7305,37 +7585,22 @@ async function main() {
           continue;
         }
 
-        state = reloadState();
-        if (await maybePreemptInputWithProactiveCompaction({
-          session,
-          config,
-          state,
-          runtimeDir,
-          message,
-          token: secrets.token,
-          chatId: secrets.allowedChatId,
-          maxChars,
-        })) {
-          continue;
-        }
-
-        const handledInput = await handleTelegramMessagesInput({
-          session,
-          statePath,
-          token: secrets.token,
-          runtimeDir,
-          config,
-          messages: [message],
-        });
-        if (handledInput.handled) {
-          if (options.once && handledInput.turn?.done) {
-            await handledInput.turn.done;
-            return;
-          }
+        if (hasModelInput) {
+          queueInputMessage({
+            pendingInputGroups,
+            message,
+            config,
+            runtimeDir,
+          });
           continue;
         }
         if (typeof message.text !== "string") {
           const kind = telegramMessageKind(message);
+          appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+            direction: "recv_unsupported_message",
+            kind,
+            ...telegramMessageShape(message),
+          });
           const text = kind === "sticker"
             ? t(config, "main.unsupportedSticker")
             : t(config, "main.unsupportedMessage", { kind });
@@ -7358,8 +7623,8 @@ async function main() {
         token: secrets.token,
         runtimeDir,
       });
-      const postUpdateLooseInputTurn = await flushDueLooseInputs({
-        pendingLooseInputs,
+      const postUpdateInputGroupTurn = await flushDueInputGroups({
+        pendingInputGroups,
         session,
         statePath,
         token: secrets.token,
@@ -7369,13 +7634,27 @@ async function main() {
         await postUpdateMediaGroupTurn.done;
         return;
       }
-      if (options.once && postUpdateLooseInputTurn?.done) {
-        await postUpdateLooseInputTurn.done;
+      if (options.once && postUpdateInputGroupTurn?.done) {
+        await postUpdateInputGroupTurn.done;
         return;
       }
-      if (pendingMediaGroups.size > 0 || pendingLooseInputs.size > 0) {
+      if (pendingMediaGroups.size > 0 || pendingInputGroups.size > 0) {
         continue;
       }
+
+      state = reloadState();
+      const companionInboxTurn = await maybeRunCompanionInboxNotice({
+        session,
+        config,
+        state,
+        statePath,
+        runtimeDir,
+      });
+      if (options.once && companionInboxTurn?.done) {
+        await companionInboxTurn.done;
+        return;
+      }
+      if (companionInboxTurn) continue;
 
       state = reloadState();
       const rhythmTurn = await maybeRunRhythm({
@@ -7394,8 +7673,18 @@ async function main() {
       }
 
       patchState(statePath, state, { last_error: null });
-      if (options.once && updates.length > 0 && pendingMediaGroups.size === 0 && pendingLooseInputs.size === 0) return;
-      await delay(Math.max(0, idleSleep) * 1000);
+      if (options.once && updates.length > 0 && pendingMediaGroups.size === 0 && pendingInputGroups.size === 0) return;
+      const rapidEmptyPoll = updates.length === 0
+        && bufferedInputFlushDelayMs === null
+        && pollElapsedMs < 1000;
+      if (rapidEmptyPoll) {
+        appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+          direction: "poll_backoff",
+          elapsed_ms: pollElapsedMs,
+          delay_ms: Math.max(0, rapidEmptyPollBackoffSeconds) * 1000,
+        });
+        await delay(Math.max(0, rapidEmptyPollBackoffSeconds) * 1000);
+      }
     } catch (error) {
       const message = error?.stack || String(error);
       patchState(statePath, state, { last_error: message });

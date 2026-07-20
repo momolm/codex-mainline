@@ -43,6 +43,7 @@
     "autonomyIntro": "Then read autonomous-action context:",
     "replyRule": "After reading them, I will not output a long startup report. I will reply naturally to the user and keep the same context for later conversation.",
     "deliveryRule": "The current entry point is Telegram. When I truly need to deliver a local file back to Telegram, I append <tg_send_file path=\"local file path\" /> at the end of my reply. I do not use that marker for ordinary chat or analysis.",
+    "stickerRule": "When I want to send a registered Telegram sticker, I output <tg_send_sticker set=\"sticker set name\" file_unique_id=\"stable sticker ID\" />. Visual selection and set management use the companion inbox --sticker-pack command.",
     "wakeRule": "After startup, I will follow the autonomous-action rules and advance one small, finishable work package. I will not create a complex process or enter an extra state machine.",
     "wakeAction": "Autonomous action."
   },
@@ -142,6 +143,12 @@
       "[Rhythm - Rest]",
       "You have been working for a while. Naturally close out this turn, record necessary results or follow-up plans, then stop and rest for a while."
     ]
+  },
+  "turnStall": {
+    "recoveryNotice": "The model stream stayed silent, so Codex Mainline interrupted the stalled turn and resumed work in the same context.",
+    "recoveryPrompt": "[Codex Mainline]: The previous model stream stayed silent after making progress, so the stalled turn was interrupted. Continue the unfinished task from the same thread context and workspace state; first briefly tell the user that automatic recovery succeeded.",
+    "inputPrompt": "[Codex Mainline]: The previous model stream stayed silent after making progress, so the stalled turn was interrupted. Prioritize the user message below and continue unfinished work using the current context.",
+    "recoveryFailedNotice": "Silent-stream recovery could not release the old turn and has stopped. Send /stop before continuing."
   },
   "compaction": {
     "started": "Codex Mainline is compacting context. Please wait.",
@@ -358,6 +365,12 @@
     "requestHeader": "[Computer Use Request]",
     "requestLine1": "Use the official Computer Use plugin to handle the Windows desktop task below.",
     "requestLine2": "First read the local computer-use plugin instructions, connect with the official minimal bootstrap, and verify lightly with sky.list_apps(); do not decide it is unavailable before completing bootstrap."
+  },
+  "companionInbox": {
+    "unreadNotice": "[Codex Companion Inbox] {count} unread message(s).",
+    "readCommand": "tool: `{command}`",
+    "logLabel": "Companion Inbox -> Codex",
+    "startupLabel": "Codex Companion Inbox notice"
   },
   "main": {
     "dryRunTitle": "Codex Mainline - Dry Run",

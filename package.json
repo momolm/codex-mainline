@@ -1,6 +1,6 @@
 {
   "name": "codex-mainline",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": false,
   "type": "module",
   "license": "MIT",
@@ -9,8 +9,11 @@
   },
   "scripts": {
     "start": "node src/start-codex-mainline.mjs",
+    "companion": "node src/start-codex-companion-inbox.mjs",
+    "companion:dry-run": "node src/start-codex-companion-inbox.mjs --dry-run",
+    "companion:self-test": "node src/start-codex-companion-inbox.mjs --self-test",
     "dry-run": "node src/start-codex-mainline.mjs --dry-run",
-    "check": "node --check src/start-codex-mainline.mjs",
+    "check": "node --check src/start-codex-mainline.mjs && node --check src/start-codex-companion-inbox.mjs",
     "test": "node --test src/*.test.mjs"
   },
   "engines": {
