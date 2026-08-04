@@ -4,6 +4,8 @@ Notable project changes are recorded here. Release tags remain the authoritative
 
 ## Unreleased
 
+## [0.1.15] - 2026-08-05
+
 ### Added
 
 - `/compact` for manually starting native context compaction on the bound thread while the mainline is idle.
@@ -52,6 +54,7 @@ Notable project changes are recorded here. Release tags remain the authoritative
 - Optional persistent `$effort` shifts for sustained same-thread work.
 - Runtime discovery and validation of each model's advertised reasoning levels.
 
+[0.1.15]: https://github.com/momolm/codex-mainline/releases/tag/v0.1.15
 [0.1.14]: https://github.com/momolm/codex-mainline/releases/tag/v0.1.14
 [0.1.13]: https://github.com/momolm/codex-mainline/releases/tag/v0.1.13
 [0.1.12]: https://github.com/momolm/codex-mainline/releases/tag/v0.1.12
