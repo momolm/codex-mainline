@@ -1,6 +1,7 @@
 {
   "botCommands": {
     "status": "Show Codex Mainline status",
+    "compact": "Compact the current context",
     "model": "Show or change default model",
     "effort": "Show or change default reasoning effort",
     "rhythm": "Show or change autonomous wake rhythm",
@@ -153,6 +154,8 @@
   "compaction": {
     "started": "Codex Mainline is compacting context. Please wait.",
     "busy": "Codex Mainline is compacting context, so this command is not being run now. Please send it again later.",
+    "manualNoThread": "There is no Codex session to compact yet.",
+    "manualActiveTurn": "Codex Mainline still has an active reply. Send /stop first, wait for it to finish, then send /compact.",
     "queued": "Codex Mainline is compacting context. This message has been queued and will be processed in order after compaction completes.",
     "completed": "Codex Mainline context compaction completed.",
     "defaultStep": "recovery setting",

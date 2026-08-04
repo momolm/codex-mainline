@@ -1,6 +1,7 @@
 {
   "botCommands": {
     "status": "查看 Codex Mainline 状态",
+    "compact": "主动压缩当前上下文",
     "model": "查看或切换默认模型",
     "effort": "查看或切换默认思考强度",
     "rhythm": "查看或切换自主激活周期",
@@ -153,6 +154,8 @@
   "compaction": {
     "started": "Codex Mainline 正在压缩上下文，稍等一下。",
     "busy": "Codex Mainline 正在压缩上下文，这条命令暂不执行。请稍后再发一次。",
+    "manualNoThread": "当前还没有可以压缩的 Codex session。",
+    "manualActiveTurn": "Codex Mainline 当前还有一轮回复在进行中。请先发送 /stop，等停止请求完成后再发送 /compact。",
     "queued": "Codex Mainline 正在压缩上下文，这条消息已进入队列。压缩完成后会按顺序处理。",
     "completed": "Codex Mainline 上下文压缩完成了。",
     "defaultStep": "恢复档位",

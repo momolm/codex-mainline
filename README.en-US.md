@@ -40,6 +40,7 @@ The result is a three-part decoupling:
 - Bilingual bridge-layer mechanical output: `zh-CN` and `en-US`.
 - Bridge-level slash commands that do not enter model context:
   - `/status`
+  - `/compact`
   - `/model`
   - `/effort`
   - `/language`
@@ -54,6 +55,7 @@ The result is a three-part decoupling:
 - Optional installable `$effort` skill for model-driven persistent shifts between `high`, `xhigh`, and `max` during sustained work.
 - Context compaction guard:
   - starts proactive compaction at 90% context usage by default;
+  - `/compact` manually compacts the current thread while the mainline is idle, then waits for the next user message;
   - sends Telegram notices for compaction start/completion/failure/timeout;
   - queues normal messages during compaction;
   - after a failed compaction, sends a short pause turn with `gpt-5.4-mini low` to trigger native recovery;

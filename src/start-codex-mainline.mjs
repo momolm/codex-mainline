@@ -6757,6 +6757,71 @@ async function main() {
           });
           continue;
         }
+        if (slashText === "/compact") {
+          logBlock(t(config, "log.userToBridge"), slashText);
+          appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {
+            direction: "recv_command",
+            command: "/compact",
+            message_id: message.message_id ?? null,
+          });
+          state = reloadState();
+          session.state = state;
+          if (!state.thread_id) {
+            await sendText({
+              token: secrets.token,
+              chatId: secrets.allowedChatId,
+              text: t(config, "compaction.manualNoThread"),
+              maxChars,
+              runtimeDir,
+              echo: true,
+            });
+            continue;
+          }
+          if (state.active_turn_id) {
+            await sendText({
+              token: secrets.token,
+              chatId: secrets.allowedChatId,
+              text: t(config, "compaction.manualActiveTurn"),
+              maxChars,
+              runtimeDir,
+              echo: true,
+            });
+            continue;
+          }
+          if (
+            isCompactionBlocked(state)
+            || state.compaction_recovery_resume_pending
+            || state.compaction_recovery_model_active
+            || state.compaction_recovery_restore_in_progress
+          ) {
+            await sendText({
+              token: secrets.token,
+              chatId: secrets.allowedChatId,
+              text: compactingBusyNotice(config),
+              maxChars,
+              runtimeDir,
+              echo: true,
+            });
+            continue;
+          }
+          if (state.compacting_until) {
+            session.noteContextCompactionTimedOut();
+            continue;
+          }
+          if (isResting(state)) {
+            clearRest(statePath, state, "manual compaction");
+          }
+          const step = compactionDefaultStep(config);
+          try {
+            await session.startContextCompaction({
+              model: step.model,
+              effort: step.effort,
+            });
+          } catch (error) {
+            session.noteContextCompactionFailed(`manual compact start failed: ${error?.message || error}`);
+          }
+          continue;
+        }
         if (slashText === "/status") {
           logBlock(t(config, "log.userToBridge"), slashText);
           appendJsonl(path.join(runtimeDir, "telegram.jsonl"), {

@@ -2,6 +2,12 @@
 
 Notable project changes are recorded here. Release tags remain the authoritative package boundaries.
 
+## Unreleased
+
+### Added
+
+- `/compact` for manually starting native context compaction on the bound thread while the mainline is idle.
+
 ## [0.1.14] - 2026-07-21
 
 ### Added

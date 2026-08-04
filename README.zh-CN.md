@@ -40,6 +40,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 - 桥接层机械输出支持双语：`zh-CN` 和 `en-US`。
 - 不进入模型上下文的桥接层 slash commands：
   - `/status`
+  - `/compact`
   - `/model`
   - `/effort`
   - `/language`
@@ -54,6 +55,7 @@ Codex Mainline 是一个面向持久 Codex app-server session 的 Telegram 界�
 - 可选安装的 `$effort` skill：在持续任务中由 Codex 主动判断，并在 `high`、`xhigh`、`max` 三档间持久换挡。
 - 上下文压缩保护：
   - 默认在上下文使用率达到 90% 时主动压缩；
+  - `/compact` 在主线空闲时主动压缩当前 thread，并在完成后等待下一条用户消息；
   - 发送压缩开始 / 完成 / 失败 / 超时的 Telegram 通知；
   - 压缩期间对普通消息排队；
   - 压缩失败后使用 `gpt-5.4-mini low` 发送短暂停 turn，以触发原生压缩恢复；
